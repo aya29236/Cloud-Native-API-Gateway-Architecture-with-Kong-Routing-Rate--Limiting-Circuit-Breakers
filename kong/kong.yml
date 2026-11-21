@@ -1,0 +1,17 @@
+_format_version: "3.0"
+_transform: true
+
+# Gate 0 only: route requests through Kong to the deterministic mock upstream.
+# Real accounts/payments/advisor services and policies are added in later layers.
+services:
+  - name: mock-upstream
+    url: http://mock-upstream:8080
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    retries: 1
+    routes:
+      - name: mock-route
+        paths:
+          - /mock
+        strip_path: true

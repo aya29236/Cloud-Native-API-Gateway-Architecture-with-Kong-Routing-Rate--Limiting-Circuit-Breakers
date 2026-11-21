@@ -1,0 +1,25 @@
+{
+  "client_ip": "192.168.1.10",
+  "request": {
+    "method": "GET",
+    "uri": "/api/accounts"
+  },
+  "response": {
+    "status": 200
+  },
+  "latencies": {
+    "proxy": 2,
+    "kong": 1,
+    "request": 3
+  },
+  "consumer": {
+    "username": "fintech-free"
+  },
+  "route": {
+    "name": "accounts"
+  },
+  "service": {
+    "name": "accounts"
+  },
+  "started_at": 1795220000
+}

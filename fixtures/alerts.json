@@ -1,0 +1,34 @@
+{
+  "version": "4",
+  "groupKey": "{}:{alertname=\"Kong429Spike\"}",
+  "status": "firing",
+  "receiver": "n8n-webhook",
+  "groupLabels": {
+    "alertname": "Kong429Spike"
+  },
+  "commonLabels": {
+    "alertname": "Kong429Spike",
+    "route": "payments"
+  },
+  "commonAnnotations": {
+    "summary": "Synthetic 429 spike for contract testing"
+  },
+  "externalURL": "http://alertmanager:9093",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "Kong429Spike",
+        "route": "payments",
+        "consumer": "fintech-free"
+      },
+      "annotations": {
+        "summary": "Synthetic 429 spike"
+      },
+      "startsAt": "2026-11-21T10:00:00Z",
+      "endsAt": "0001-01-01T00:00:00Z",
+      "generatorURL": "http://prometheus:9090/graph",
+      "fingerprint": "0123456789abcdef"
+    }
+  ]
+}

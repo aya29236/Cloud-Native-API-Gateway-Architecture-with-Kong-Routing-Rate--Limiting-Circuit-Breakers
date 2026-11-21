@@ -1,0 +1,25 @@
+name: Gate 0 validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  repository-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON fixtures
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in Path("fixtures").glob("*.json"):
+              json.loads(path.read_text(encoding="utf-8"))
+              print(f"valid JSON: {path}")
+          json.loads(Path("contracts/logs/kong-access-log.schema.json").read_text(encoding="utf-8"))
+          print("valid JSON Schema document")
+          PY
+      - name: Validate Compose configuration
+        run: docker compose --profile core config --quiet

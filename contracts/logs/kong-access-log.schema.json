@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/contracts/kong-access-log.schema.json",
+  "title": "Kong access log record (draft; verify against kong:3.9.1)",
+  "type": "object",
+  "required": [
+    "client_ip",
+    "request",
+    "response",
+    "latencies",
+    "started_at"
+  ],
+  "properties": {
+    "client_ip": {
+      "type": "string"
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "method",
+        "uri"
+      ],
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "integer"
+        }
+      }
+    },
+    "latencies": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "consumer": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "route": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "service": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "started_at": {
+      "type": "integer"
+    }
+  },
+  "additionalProperties": true
+}

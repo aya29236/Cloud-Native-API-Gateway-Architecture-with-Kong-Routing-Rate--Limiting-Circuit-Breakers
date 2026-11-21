@@ -1,0 +1,24 @@
+{
+  "health": {
+    "status": 200,
+    "body": {
+      "status": "healthy"
+    }
+  },
+  "echo": {
+    "status": 200,
+    "body": {
+      "method": "POST",
+      "path": "/echo",
+      "received": {
+        "hello": "world"
+      }
+    }
+  },
+  "fail": {
+    "status": 500,
+    "body": {
+      "error": "synthetic_failure"
+    }
+  }
+}

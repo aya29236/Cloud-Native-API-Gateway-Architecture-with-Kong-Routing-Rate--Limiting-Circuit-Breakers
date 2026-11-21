@@ -1,0 +1,80 @@
+openapi: 3.1.0
+info:
+  title: FinTech Gateway Service Contracts
+  version: 0.1.0
+  description: Draft contract pack for Gate 0; review and approve before implementation.
+servers:
+  - url: http://localhost:8000
+paths:
+  /accounts/health:
+    get:
+      operationId: accountsHealth
+      responses:
+        "200":
+          description: Service health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /payments/health:
+    get:
+      operationId: paymentsHealth
+      responses:
+        "200":
+          description: Service health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /advisor/health:
+    get:
+      operationId: advisorHealth
+      responses:
+        "200":
+          description: Service health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /advisor/analyze:
+    post:
+      operationId: analyzeLogs
+      description: Analyzer answers only from verified Kong log tool results.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [summary, stats, citations, tool_trace, verified]
+                properties:
+                  summary: { type: string }
+                  stats: { type: object, additionalProperties: true }
+                  citations:
+                    type: array
+                    items: { type: string }
+                  tool_trace:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  verified: { type: boolean }
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded]

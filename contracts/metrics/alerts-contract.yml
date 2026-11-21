@@ -1,0 +1,27 @@
+contract_version: 0.1.0
+status: draft
+note: Metric names/labels must be confirmed against kong:3.9.1 /metrics before freezing.
+alerts:
+  - name: KongCircuitOpen
+    meaning: Upstream is returning 503 responses for at least 15 seconds.
+    expected_labels: [route]
+  - name: Kong429Spike
+    meaning: HTTP 429 responses exceed the agreed threshold for 30 seconds.
+    expected_labels: [route, consumer]
+    note: consumer label is optional unless confirmed present in the selected metric.
+  - name: KongUpstreamTargetUnhealthy
+    meaning: Kong reports an upstream target as unhealthy.
+    expected_labels: [upstream, target]
+alertmanager_webhook:
+  required_fields:
+    - version
+    - status
+    - receiver
+    - alerts
+  alert_fields:
+    - status
+    - labels
+    - annotations
+    - startsAt
+    - endsAt
+    - fingerprint
