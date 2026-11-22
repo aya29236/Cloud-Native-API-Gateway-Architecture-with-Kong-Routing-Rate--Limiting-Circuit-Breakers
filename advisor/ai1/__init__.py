@@ -16,6 +16,13 @@ from .reader import (
     read_kong_log_text,
 )
 from .tools import (
+    ConsumerStatsArgs,
+    GetLogLinesArgs,
+    StatusBreakdownArgs,
+    TimeRangeArgs,
+    TopIPRoutePairsArgs,
+    TopIPsArgs,
+    TopRoutesArgs,
     consumer_stats,
     get_log_lines,
     status_breakdown,
@@ -46,4 +53,11 @@ __all__ = [
     "consumer_stats",
     "get_log_lines",
     "generate_synthetic_logs",
+    "TimeRangeArgs",
+    "StatusBreakdownArgs",
+    "TopIPsArgs",
+    "TopRoutesArgs",
+    "TopIPRoutePairsArgs",
+    "ConsumerStatsArgs",
+    "GetLogLinesArgs",
 ]

@@ -4,7 +4,50 @@ from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from .models import ParsedLogRecord
+
+
+class ToolArgumentModel(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class TimeRangeArgs(ToolArgumentModel):
+    start_at: int | None = None
+    end_at: int | None = None
+
+
+class StatusBreakdownArgs(ToolArgumentModel):
+    start_at: int | None = None
+    end_at: int | None = None
+
+
+class TopIPsArgs(ToolArgumentModel):
+    limit: int = 10
+    start_at: int | None = None
+    end_at: int | None = None
+
+
+class TopRoutesArgs(ToolArgumentModel):
+    limit: int = 10
+    start_at: int | None = None
+    end_at: int | None = None
+
+
+class TopIPRoutePairsArgs(ToolArgumentModel):
+    limit: int = 10
+    start_at: int | None = None
+    end_at: int | None = None
+
+
+class ConsumerStatsArgs(ToolArgumentModel):
+    start_at: int | None = None
+    end_at: int | None = None
+
+
+class GetLogLinesArgs(ToolArgumentModel):
+    limit: int = 20
 
 
 def _records(

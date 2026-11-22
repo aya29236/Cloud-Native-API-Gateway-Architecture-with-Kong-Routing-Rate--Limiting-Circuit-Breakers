@@ -45,3 +45,40 @@ python -m advisor.ai1.demo
 - `started_at` remains an integer. Its unit and timezone are unconfirmed.
 - Counts use descending count order, with ascending string tie-breaking.
 - Time bounds are inclusive and integer-valued.
+
+## Student C AI2
+
+AI2 is a bounded tool-calling loop that uses Pydantic-generated Ollama tool
+schemas and deterministic AI1 tools. It has no agent framework or fine-tuning.
+
+Set the Ollama model explicitly:
+
+```powershell
+$env:OLLAMA_HOST = "http://localhost:11434"
+$env:ADVISOR_MODEL = "<your-installed-tool-capable-model>"
+```
+
+`OLLAMA_HOST` defaults to `http://localhost:11434`. `ADVISOR_MODEL` has no
+default; it must be set before `OllamaClient` can start.
+
+Run the no-network scripted demo:
+
+```powershell
+python -m advisor.ai2.demo
+```
+
+Run the real Ollama spike:
+
+```powershell
+python -m advisor.ai2.spike
+```
+
+The live demo is available when the model is configured:
+
+```powershell
+python -m advisor.ai2.demo --live
+```
+
+AI2 only sends tool arguments to AI1, wraps tool output as untrusted data, and
+preserves ordered traces. It never computes statistics. `AnalyzeResponse.verified`
+is always `False`; AI3 will perform verification and retry.
