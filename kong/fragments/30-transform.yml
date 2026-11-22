@@ -1,0 +1,49 @@
+plugins:
+  - name: correlation-id
+    route: mock-route
+    config:
+      header_name: Kong-Request-ID
+      generator: uuid
+      echo_downstream: true
+  - name: request-transformer
+    route: mock-route
+    config:
+      add:
+        headers:
+          - "X-Gateway: fintech-api-gateway"
+      remove:
+        headers:
+          - X-Debug
+  - name: cors
+    route: mock-route
+    config:
+      origins:
+        - http://localhost:3000
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Content-Type
+        - Kong-Request-ID
+        # Provisional until G2 confirms its authentication header name.
+        - X-API-Key
+        - X-Debug
+      exposed_headers:
+        - Kong-Request-ID
+        - X-RateLimit-Limit-Minute
+        - X-RateLimit-Remaining-Minute
+        - RateLimit-Limit
+        - RateLimit-Remaining
+        - RateLimit-Reset
+        - Retry-After
+      preflight_continue: false
+  - name: request-size-limiting
+    route: mock-route
+    config:
+      allowed_payload_size: 1
+      size_unit: megabytes
