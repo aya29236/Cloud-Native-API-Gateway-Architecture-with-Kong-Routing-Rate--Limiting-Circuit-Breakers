@@ -49,6 +49,7 @@ def _arguments_dict(arguments: Any) -> dict[str, Any]:
             return dict(parsed) if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             return {}
+    return {}
 
 
 def _json_safe(value: Any) -> Any:

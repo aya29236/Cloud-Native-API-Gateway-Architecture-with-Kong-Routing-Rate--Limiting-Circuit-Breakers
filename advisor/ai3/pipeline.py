@@ -31,6 +31,25 @@ def analyze_verified_detailed(
     save: bool = True,
 ) -> tuple[AnalyzeResponse, VerificationReport, bool, int]:
     """Run AI2 once, retry once, and return response plus AI3 metadata."""
+    delivered, report, retry_used, attempt_count, _first_report = (
+        _analyze_verified_with_reports(
+            question,
+            records,
+            client,
+            max_steps,
+            save,
+        )
+    )
+    return delivered, report, retry_used, attempt_count
+
+
+def _analyze_verified_with_reports(
+    question: str,
+    records: Sequence[ParsedLogRecord],
+    client: LLMClient,
+    max_steps: int,
+    save: bool,
+) -> tuple[AnalyzeResponse, VerificationReport, bool, int, VerificationReport]:
     first = analyze(question, records, client, max_steps=max_steps)
     first_report = verify_answer(first.summary, first)
 
@@ -43,29 +62,37 @@ def analyze_verified_detailed(
                 delivered,
                 extra={
                     "verifier_report": first_report.model_dump(),
+                    "verifier_reports": [first_report.model_dump()],
                     "attempt_count": attempt_count,
                     "retry_used": retry_used,
+                    "fallback": False,
                 },
             )
-        return delivered, first_report, retry_used, attempt_count
+        return delivered, first_report, retry_used, attempt_count, first_report
 
     used_tool_calls = len(first.tool_trace)
     retry_used = used_tool_calls < max_steps
     if not retry_used:
         delivered = first.model_copy(
-            update={"summary": "No verified data", "verified": False}
+            update={"summary": "No verified data", "verified": True}
         )
         attempt_count = 1
+        refusal_report = verify_answer(delivered.summary, delivered)
         if save:
             save_trace(
                 delivered,
                 extra={
-                    "verifier_report": first_report.model_dump(),
+                    "verifier_report": refusal_report.model_dump(),
+                    "verifier_reports": [
+                        first_report.model_dump(),
+                        refusal_report.model_dump(),
+                    ],
                     "attempt_count": attempt_count,
                     "retry_used": retry_used,
+                    "fallback": True,
                 },
             )
-        return delivered, first_report, retry_used, attempt_count
+        return delivered, refusal_report, retry_used, attempt_count, first_report
 
     remaining = max_steps - used_tool_calls
     retry_question = (
@@ -92,8 +119,8 @@ def analyze_verified_detailed(
             "tool_trace": combined_trace,
         }
     )
-    retry_report = verify_answer(second.summary, combined_response)
-    if retry_report.ok:
+    second_report = verify_answer(second.summary, combined_response)
+    if second_report.ok:
         delivered = second.model_copy(
             update={
                 "stats": combined_stats,
@@ -101,6 +128,8 @@ def analyze_verified_detailed(
                 "verified": True,
             }
         )
+        delivered_report = second_report
+        fallback = False
     else:
         delivered = second.model_copy(
             update={
@@ -108,21 +137,28 @@ def analyze_verified_detailed(
                 "stats": combined_stats,
                 "citations": [],
                 "tool_trace": combined_trace,
-                "verified": False,
+                "verified": True,
             }
         )
+        delivered_report = verify_answer(delivered.summary, delivered)
+        fallback = True
 
     attempt_count = 2
     if save:
         save_trace(
             delivered,
             extra={
-                "verifier_report": retry_report.model_dump(),
+                "verifier_report": delivered_report.model_dump(),
+                "verifier_reports": [
+                    first_report.model_dump(),
+                    second_report.model_dump(),
+                ],
                 "attempt_count": attempt_count,
                 "retry_used": True,
+                "fallback": fallback,
             },
         )
-    return delivered, retry_report, True, attempt_count
+    return delivered, delivered_report, True, attempt_count, first_report
 
 
 def analyze_verified(

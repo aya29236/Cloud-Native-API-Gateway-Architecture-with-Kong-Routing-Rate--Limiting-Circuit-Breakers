@@ -9,7 +9,13 @@ from pydantic import ValidationError
 
 from advisor.ai1.generator import generate_synthetic_logs
 from advisor.ai1.reader import read_kong_log_text
-from advisor.ai2.agent import MAX_STEPS, AnalyzeResponse, analyze, save_trace
+from advisor.ai2.agent import (
+    MAX_STEPS,
+    AnalyzeResponse,
+    _arguments_dict,
+    analyze,
+    save_trace,
+)
 from advisor.ai2.llm import OllamaClient, ScriptedClient
 from advisor.ai2.prompts import SYSTEM_PROMPT, tool_result_message
 from advisor.ai2.schemas import TOOL_REGISTRY, build_tool_definitions
@@ -103,6 +109,11 @@ def test_extra_arguments_are_rejected_before_tool_execution():
     response = analyze("reject extra", parsed, client)
     assert len(response.tool_trace) == 1
     assert "invalid arguments" in response.tool_trace[0]["error"]
+
+
+@pytest.mark.parametrize("value", [None, 42, ["limit", 1]])
+def test_non_dict_non_string_tool_arguments_return_empty_dict(value):
+    assert _arguments_dict(value) == {}
 
 
 def test_step_cap_stops_at_exactly_six_calls():

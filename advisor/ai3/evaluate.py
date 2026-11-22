@@ -13,7 +13,6 @@ from advisor.ai1.generator import generate_synthetic_logs
 from advisor.ai1.reader import read_kong_log_text
 from advisor.ai2.llm import OllamaClient, ScriptedClient
 from advisor.ai3.eval_set import load_eval_questions
-from advisor.ai3.pipeline import analyze_verified_detailed
 
 
 SCRIPT_TABLE = Path(__file__).with_name("eval_table.md")
@@ -197,23 +196,79 @@ def answer_matches(expected_kind: str, expected: dict[str, Any], answer: str) ->
 
 def compute_metrics(
     rows: list[dict[str, Any]],
-) -> tuple[float, float, float, int]:
-    """Compute metrics for a row set."""
-    if not rows:
-        return 0.0, 0.0, 0.0, 0
-    grounded = sum(1 for row in rows if row["verified"]) / len(rows)
-    answerable = [row for row in rows if row["category"] not in {"unanswerable", "hallucination_bait"}]
-    exact = sum(1 for row in answerable if row["correct"]) / len(answerable) if answerable else 0.0
+) -> dict[str, tuple[int, int, float] | int]:
+    """Return each rate with numerator and denominator, plus blocked count."""
+    grounded_num = sum(1 for row in rows if row["verified"])
+    grounded_den = len(rows)
+    first_num = sum(1 for row in rows if row["first_verified"])
+    first_den = len(rows)
+    answerable = [row for row in rows if row["answerable"]]
+    exact_num = sum(1 for row in answerable if row["correct"])
+    exact_den = len(answerable)
     refusals = [
         row
         for row in rows
         if row["category"] in {"unanswerable", "hallucination_bait"}
     ]
-    refusal_correct = sum(
+    refusal_num = sum(
         1 for row in refusals if row["answer"] == "No verified data"
-    ) / len(refusals) if refusals else 0.0
+    )
+    refusal_den = len(refusals)
     invented_blocked = sum(1 for row in rows if row.get("bad_first_blocked"))
-    return grounded, exact, refusal_correct, invented_blocked
+    return {
+        "groundedness": (
+            grounded_num,
+            grounded_den,
+            grounded_num / grounded_den if grounded_den else 0.0,
+        ),
+        "first_attempt_valid": (
+            first_num,
+            first_den,
+            first_num / first_den if first_den else 0.0,
+        ),
+        "exact_match": (
+            exact_num,
+            exact_den,
+            exact_num / exact_den if exact_den else 0.0,
+        ),
+        "correct_refusal": (
+            refusal_num,
+            refusal_den,
+            refusal_num / refusal_den if refusal_den else 0.0,
+        ),
+        "invented_facts_blocked": invented_blocked,
+    }
+
+
+def _expected_for_question(
+    expected_kind: str,
+    truths: dict[str, Any],
+) -> Any:
+    key_by_kind = {
+        "top_429_ip": "top429_ip",
+        "top_503_route": "top503_route",
+        "status_breakdown": "status_breakdown",
+        "consumer_stats": "consumer_stats",
+        "time_range": "time_range",
+        "line_request": "line_request",
+    }
+    if expected_kind == "refusal":
+        return "No verified data"
+    return truths[key_by_kind[expected_kind]]
+
+
+def _failure_reason(report: Any) -> str:
+    if report.ok or not report.issues:
+        return ""
+    issue = report.issues[0]
+    labels = {
+        "unsupported_ip": "invented IP",
+        "unsupported_number": "unsupported number",
+        "unsupported_route": "unsupported route",
+        "unsupported_citation": "fake citation",
+        "citation_claim": "citation mismatch",
+    }
+    return f"{labels.get(issue.kind, issue.kind)} {issue.value}".strip()
 
 
 def render_table(
@@ -223,8 +278,8 @@ def render_table(
     lines = [
         title,
         "",
-        "| id | category | question | expected | answer delivered | verified | retry used | correct? |",
-        "|---|---|---|---|---|---|---|---|",
+        "| id | category | question | expected | answer delivered | verified | retry used | correct? | failure/blocked reason |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
@@ -239,17 +294,29 @@ def render_table(
                     str(row["verified"]).lower(),
                     str(row["retry_used"]).lower(),
                     str(row["correct"]).lower(),
+                    str(row["failure_reason"]),
                 ]
             )
             + " |"
         )
-    grounded, exact, refusal, blocked = compute_metrics(rows)
+    metrics = compute_metrics(rows)
+    grounded = metrics["groundedness"]
+    first_valid = metrics["first_attempt_valid"]
+    exact = metrics["exact_match"]
+    refusal = metrics["correct_refusal"]
+    blocked = metrics["invented_facts_blocked"]
+    assert isinstance(grounded, tuple)
+    assert isinstance(first_valid, tuple)
+    assert isinstance(exact, tuple)
+    assert isinstance(refusal, tuple)
+    assert isinstance(blocked, int)
     lines.extend(
         [
             "",
-            f"Groundedness rate: {grounded:.3f}",
-            f"Exact-match rate: {exact:.3f}",
-            f"Correct-refusal rate: {refusal:.3f}",
+            f"Groundedness rate: {grounded[0]}/{grounded[1]} = {grounded[2]:.3f}",
+            f"First-attempt valid rate: {first_valid[0]}/{first_valid[1]} = {first_valid[2]:.3f}",
+            f"Exact-match rate: {exact[0]}/{exact[1]} = {exact[2]:.3f}",
+            f"Correct-refusal rate: {refusal[0]}/{refusal[1]} = {refusal[2]:.3f}",
             f"Invented facts BLOCKED: {blocked}",
         ]
     )
@@ -265,14 +332,17 @@ def run_scripted() -> tuple[list[dict[str, Any]], str]:
 
     for item in load_eval_questions():
         kind = item["expected_kind"]
-        expected = truths if kind != "refusal" else "No verified data"
+        expected = _expected_for_question(kind, truths)
         client = ScriptedClient(
             scripted_messages(item["behavior"], truths)
         )
-        response, report, retry_used, _attempt_count = analyze_verified_detailed(
+        from advisor.ai3.pipeline import _analyze_verified_with_reports
+
+        response, report, retry_used, _attempt_count, first_report = _analyze_verified_with_reports(
             item["question"],
             parsed,
             client,
+            6,
             save=False,
         )
         correct = answer_matches(kind, truths, response.summary)
@@ -291,6 +361,9 @@ def run_scripted() -> tuple[list[dict[str, Any]], str]:
                 "verified": response.verified and report.ok,
                 "retry_used": retry_used,
                 "correct": correct,
+                "first_verified": first_report.ok,
+                "answerable": kind != "refusal",
+                "failure_reason": _failure_reason(first_report),
                 "bad_first_blocked": bad_first_blocked,
             }
         )
@@ -320,10 +393,13 @@ def run_live() -> tuple[list[dict[str, Any]], str]:
     rows: list[dict[str, Any]] = []
     for item in load_eval_questions():
         try:
-            response, report, retry_used, _attempt_count = analyze_verified_detailed(
+            from advisor.ai3.pipeline import _analyze_verified_with_reports
+
+            response, report, retry_used, _attempt_count, first_report = _analyze_verified_with_reports(
                 item["question"],
                 parsed,
                 client,
+                6,
                 save=False,
             )
         except Exception as exc:
@@ -336,11 +412,14 @@ def run_live() -> tuple[list[dict[str, Any]], str]:
                 "id": item["id"],
                 "category": item["category"],
                 "question": item["question"],
-                "expected": truths if kind != "refusal" else "No verified data",
+                "expected": _expected_for_question(kind, truths),
                 "answer": response.summary,
                 "verified": response.verified and report.ok,
                 "retry_used": retry_used,
                 "correct": correct,
+                "first_verified": first_report.ok,
+                "answerable": kind != "refusal",
+                "failure_reason": _failure_reason(first_report),
                 "bad_first_blocked": False,
             }
         )

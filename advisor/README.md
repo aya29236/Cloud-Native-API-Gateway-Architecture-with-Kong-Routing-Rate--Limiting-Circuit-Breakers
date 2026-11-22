@@ -99,8 +99,10 @@ tool-call budget of six. If the retry fails, the delivered summary is exactly
 `No verified data`.
 
 `verified=True` means that the delivered summary passed the deterministic verifier.
-This exact-refusal string passes verifier checks by definition. AI3 does not replace
-an independent semantic judge.
+If both generated answers fail, the delivered `No verified data` fallback itself
+passes verification and is returned with `verified=True`; both rejected reports
+and `fallback=true` are retained in the saved trace. **Pending team approval of the
+C1 meaning of `verified`.** AI3 does not replace an independent semantic judge.
 
 Run the script-measuring verifier evaluation:
 

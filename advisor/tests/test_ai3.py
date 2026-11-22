@@ -249,9 +249,43 @@ def test_bad_then_bad_retry_falls_back_without_second_retry():
     )
     assert retry_used
     assert attempt_count == 2
-    assert not report.ok
+    assert report.ok
     assert response.summary == "No verified data"
-    assert not response.verified
+    assert response.verified
+
+
+def test_fallback_refusal_verified_and_trace_keeps_both_reports(monkeypatch, tmp_path):
+    import advisor.ai3.pipeline as pipeline
+
+    captured = {}
+
+    def capture_trace(response, directory="advisor/traces", extra=None):
+        captured["response"] = response
+        captured["extra"] = extra
+        return tmp_path / "trace.json"
+
+    monkeypatch.setattr(pipeline, "save_trace", capture_trace)
+    records, _raw, _expected = agent_records()
+    response, report, retry_used, attempt_count = analyze_verified_detailed(
+        "bad then bad",
+        records,
+        ScriptedClient(
+            [
+                {"role": "assistant", "content": "192.0.2.250"},
+                {"role": "assistant", "content": "192.0.2.250"},
+            ]
+        ),
+        save=True,
+    )
+    assert response.summary == "No verified data"
+    assert response.verified is True
+    assert report.ok is True
+    assert retry_used and attempt_count == 2
+    assert captured["extra"]["fallback"] is True
+    assert captured["extra"]["attempt_count"] == 2
+    assert len(captured["extra"]["verifier_reports"]) == 2
+    assert captured["extra"]["verifier_reports"][0]["ok"] is False
+    assert captured["extra"]["verifier_reports"][1]["ok"] is False
 
 
 def test_third_scripted_answer_is_never_used():
@@ -339,16 +373,17 @@ def test_eval_ground_truth_matches_independent_pandas():
 
 def test_hand_made_metrics():
     rows = [
-        {"category": "ground_truth", "verified": True, "correct": True, "answer": "x"},
-        {"category": "paraphrases", "verified": True, "correct": True, "answer": "x"},
-        {"category": "unanswerable", "verified": True, "correct": True, "answer": "No verified data"},
-        {"category": "hallucination_bait", "verified": True, "correct": False, "answer": "192.0.2.1"},
+        {"category": "ground_truth", "verified": True, "first_verified": True, "answerable": True, "correct": True, "answer": "x"},
+        {"category": "paraphrases", "verified": True, "first_verified": False, "answerable": True, "correct": True, "answer": "x"},
+        {"category": "unanswerable", "verified": True, "first_verified": True, "answerable": False, "correct": True, "answer": "No verified data"},
+        {"category": "hallucination_bait", "verified": True, "first_verified": False, "answerable": False, "correct": False, "answer": "192.0.2.1"},
     ]
-    grounded, exact, refusal, blocked = compute_metrics(rows)
-    assert grounded == 1.0
-    assert exact == 1.0
-    assert refusal == 0.5
-    assert blocked == 0
+    metrics = compute_metrics(rows)
+    assert metrics["groundedness"] == (4, 4, 1.0)
+    assert metrics["first_attempt_valid"] == (2, 4, 0.5)
+    assert metrics["exact_match"] == (2, 2, 1.0)
+    assert metrics["correct_refusal"] == (1, 2, 0.5)
+    assert metrics["invented_facts_blocked"] == 0
 
 
 def test_scripted_evaluate_writes_table_and_rates(tmp_path, monkeypatch):
@@ -359,4 +394,7 @@ def test_scripted_evaluate_writes_table_and_rates(tmp_path, monkeypatch):
     assert len(rows) == 18
     assert (tmp_path / "eval_table.md").exists()
     assert "Scripted mode measures the verifier" in table
-    assert "Groundedness rate:" in table
+    assert "Groundedness rate: 18/18 = 1.000" in table
+    assert "First-attempt valid rate:" in table
+    assert "| P01 | paraphrases | Which IP sent the most 429 responses? | 198.51.100.44 |" in table
+    assert "invented IP 192.0.2.250" in table
