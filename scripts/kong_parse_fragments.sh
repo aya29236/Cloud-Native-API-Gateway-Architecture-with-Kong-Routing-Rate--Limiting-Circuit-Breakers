@@ -42,5 +42,5 @@ write_merged_config "$temp_dir/transform.yml" "$repo_root/kong/fragments/30-tran
 
 for filename in ratelimit.yml transform.yml; do
   echo "Parsing $filename with $image"
-  docker run --rm -v "$temp_dir:/c:ro" "$image" kong config parse "/c/$filename"
+  docker run --rm -e KONG_DATABASE=off -v "$temp_dir:/c:ro" "$image" kong config parse "/c/$filename"
 done

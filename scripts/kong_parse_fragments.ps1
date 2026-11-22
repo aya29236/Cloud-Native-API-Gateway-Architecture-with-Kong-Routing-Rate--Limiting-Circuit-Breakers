@@ -43,7 +43,7 @@ try {
     foreach ($config in @($ratelimit, $transform)) {
         $fileName = [System.IO.Path]::GetFileName($config)
         Write-Output "Parsing $fileName with $image"
-        docker run --rm -v "${tempDir}:/c:ro" $image kong config parse "/c/$fileName"
+        docker run --rm -e KONG_DATABASE=off -v "${tempDir}:/c:ro" $image kong config parse "/c/$fileName"
         if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
         }

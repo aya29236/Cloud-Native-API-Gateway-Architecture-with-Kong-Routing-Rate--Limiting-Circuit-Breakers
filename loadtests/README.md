@@ -54,6 +54,12 @@ than `--host` for this locustfile's configurable default.
 
 `requirements-loadtest.txt` contains unpinned `locust` and `PyYAML`.
 PyYAML is used by `tests/test_fragments.py` to load and structurally validate
-the Kong YAML fragments. This scenario was designed for the project's
-`kong:3.9.1` and `/mock` route, but no live Kong behavior should be claimed
-unless the stack has been started and observed.
+the Kong YAML fragments. The scenario was run against the live temporary
+`kong:3.9.1` + mock-upstream stack on **2026-11-22** (not against the standalone
+mock fallback): one user for 20 seconds, premium test key, 131 requests, 51
+failures (38.93%), p95 12 ms. The failure breakdown was 20 upstream `/fail`
+500s and 31 rate-limit 429s. With the default 30% error threshold and 2000 ms
+p95 threshold, Locust exited **1** because the error-rate threshold was
+breached. HTML and CSV results were written under the ignored
+`loadtests/reports/` directory. This is a threshold-breach result, not a
+passing load run.
