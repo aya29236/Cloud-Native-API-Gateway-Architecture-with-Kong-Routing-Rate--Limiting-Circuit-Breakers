@@ -1,0 +1,20 @@
+# G2 owns these consumers and their credentials. This fragment references
+# usernames only and never defines API keys or other credentials.
+# The Kong OSS rate-limiting plugin counts requests entering its access phase
+# by the authenticated consumer and time window. With policy=local, counters
+# are local to each Kong node and are not shared across a cluster.
+plugins:
+  - name: rate-limiting
+    consumer: fintech-free
+    config:
+      minute: 10
+      limit_by: consumer
+      policy: local
+      hide_client_headers: false
+  - name: rate-limiting
+    consumer: fintech-premium
+    config:
+      minute: 100
+      limit_by: consumer
+      policy: local
+      hide_client_headers: false
