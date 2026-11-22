@@ -1,27 +1,118 @@
-contract_version: 0.1.0
-status: draft
-note: Metric names/labels must be confirmed against kong:3.9.1 /metrics before freezing.
+contract_version: 0.2.0
+status: approved
+frozen: true
+approved_by:
+  - Student A - Eya Derouiche
+  - Student B - Aya Fayachi
+  - Student C - Wafe Bziouiche
+source: Master Plan v5 section 2.1 (C3), M1, M2, M3, M5
+
+version_history:
+  - "0.1.0: initial draft with alert names and webhook fields."
+  - "0.2.0: added canonical metric names, labels, concrete thresholds,
+    severities, annotations, Alertmanager grouping and a complete sample
+    webhook payload; promoted to approved and frozen."
+
+metric_source:
+  exporter: kong-prometheus-plugin
+  scrape_target: "kong:8100"
+  scrape_interval: 5s
+  note: |
+    The names below are the canonical contract names used by the rules.
+    M1 confirms the exact exporter names against the live kong:3.9.1
+    /metrics endpoint. Any difference is a versioned contract change,
+    never an undocumented local edit.
+
+metrics:
+  - name: kong_http_requests_total
+    type: counter
+    labels: [service, route, code, method, consumer]
+    used_by: [KongCircuitOpen, Kong429Spike]
+  - name: kong_upstream_target_health
+    type: gauge
+    labels: [upstream, target, address, state]
+    used_by: [KongUpstreamTargetUnhealthy]
+
+rate_limit_reference:
+  description: Tiered per-consumer values from Master Plan G3; they justify the Kong429Spike threshold.
+  limit_by: consumer
+  policy: local
+  tiers:
+    fintech-free: 10/min
+    fintech-premium: 100/min
+  additional_policies:
+    - name: token-bucket
+      applied_to: payments
+      free_capacity: 5
+      refill_rate: 1/token/s
+
 alerts:
   - name: KongCircuitOpen
-    meaning: Upstream is returning 503 responses for at least 15 seconds.
-    expected_labels: [route]
+    expression: 'sum by (route) (rate(kong_http_requests_total{code="503"}[1m])) > 0'
+    for: 15s
+    severity: critical
+    meaning: All targets for a route are unhealthy and Kong returns HTTP 503.
+    expected_labels: [alertname, route, service, severity]
+    annotations:
+      summary: "Circuit open on Kong route {{ $labels.route }}"
+      description: "HTTP 503 responses for at least 15 seconds on route {{ $labels.route }}."
+    workflow: circuit-open
   - name: Kong429Spike
-    meaning: HTTP 429 responses exceed the agreed threshold for 30 seconds.
-    expected_labels: [route, consumer]
-    note: consumer label is optional unless confirmed present in the selected metric.
+    expression: 'sum by (route, consumer) (rate(kong_http_requests_total{code="429"}[1m])) > 0.5'
+    for: 30s
+    severity: warning
+    meaning: |
+      HTTP 429 responses exceed 0.5 per second (30 per minute) for 30
+      seconds, grouped by route and consumer. This is three times the
+      fintech-free allowance of 10/min and flags a sustained burst.
+    expected_labels: [alertname, route, consumer, severity]
+    optional_labels: [consumer]
+    note: The consumer label is used only if the exporter provides it.
+    annotations:
+      summary: "429 spike on {{ $labels.route }} for {{ $labels.consumer }}"
+      description: "More than 0.5 HTTP 429 responses per second for 30 seconds."
+    workflow: "429"
   - name: KongUpstreamTargetUnhealthy
-    meaning: Kong reports an upstream target as unhealthy.
-    expected_labels: [upstream, target]
-alertmanager_webhook:
-  required_fields:
-    - version
-    - status
-    - receiver
-    - alerts
-  alert_fields:
-    - status
-    - labels
-    - annotations
-    - startsAt
-    - endsAt
-    - fingerprint
+    expression: 'kong_upstream_target_health == 0'
+    for: 10s
+    severity: critical
+    meaning: A Kong upstream target is marked unhealthy by active or passive checks.
+    expected_labels: [alertname, upstream, target, severity]
+    annotations:
+      summary: "Upstream target {{ $labels.target }} unhealthy"
+      description: "Target {{ $labels.target }} in upstream {{ $labels.upstream }} is unhealthy."
+    workflow: circuit-open
+
+alertmanager:
+  receiver: n8n-webhook
+  group_by: [alertname, service]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 4h
+  inhibition:
+    source: KongUpstreamTargetUnhealthy
+    target: KongCircuitOpen
+    equal_labels: [service]
+
+webhook:
+  endpoint: http://n8n:5678/webhook/alertmanager
+  required_fields: [version, status, receiver, alerts]
+  alert_fields: [status, labels, annotations, startsAt, endsAt, fingerprint]
+  sample_payload:
+    version: "4"
+    status: firing
+    receiver: n8n-webhook
+    groupKey: "{}:{alertname=\"KongCircuitOpen\"}"
+    alerts:
+      - status: firing
+        labels:
+          alertname: KongCircuitOpen
+          route: accounts
+          service: accounts
+          severity: critical
+        annotations:
+          summary: "Circuit open on Kong route accounts"
+          description: "HTTP 503 responses for at least 15 seconds on route accounts."
+        startsAt: "2026-11-22T10:00:00.000Z"
+        endsAt: "0001-01-01T00:00:00.000Z"
+        fingerprint: "a1b2c3d4e5f60718"

@@ -1,7 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/contracts/kong-access-log.schema.json",
-  "title": "Kong access log record (draft; verify against kong:3.9.1)",
+  "title": "Kong access log record (C2, approved)",
+  "contract_version": "0.1.1",
+  "status": "approved",
+  "frozen": true,
+  "approved_by": [
+    "Student A - Eya Derouiche",
+    "Student B - Aya Fayachi",
+    "Student C - Wafe Bziouiche"
+  ],
+  "verification": "G7 verifies the real Kong 3.9.1 file-log output against these fields. Any mismatch requires a versioned contract change.",
+  "version_history": [
+    "0.1.0: initial draft field set.",
+    "0.1.1: approval metadata added; field set unchanged."
+  ],
   "type": "object",
   "required": [
     "client_ip",
