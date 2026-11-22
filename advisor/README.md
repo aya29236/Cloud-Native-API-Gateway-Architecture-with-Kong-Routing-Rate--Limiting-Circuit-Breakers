@@ -82,3 +82,40 @@ python -m advisor.ai2.demo --live
 AI2 only sends tool arguments to AI1, wraps tool output as untrusted data, and
 preserves ordered traces. It never computes statistics. `AnalyzeResponse.verified`
 is always `False`; AI3 will perform verification and retry.
+
+## Student C AI3
+
+AI3 is a deterministic verifier over AI2 tool traces. It extracts IPs, routes,
+numeric values and `[L<id>]` citations, then checks only evidence produced by the
+tools called in the current run. Numeric values in tool arguments, including limits
+and time bounds, are also allowed evidence.
+
+The verifier does not inspect the raw log file or the original question. It does
+not check every possible semantic fact, sentence style or whether an answer is
+complete. It does block unsupported IPs, routes, numbers and citation claims.
+
+A failed answer gets one retry. The first and retry attempts share a maximum
+tool-call budget of six. If the retry fails, the delivered summary is exactly
+`No verified data`.
+
+`verified=True` means that the delivered summary passed the deterministic verifier.
+This exact-refusal string passes verifier checks by definition. AI3 does not replace
+an independent semantic judge.
+
+Run the script-measuring verifier evaluation:
+
+```powershell
+python -m advisor.ai3.evaluate
+```
+
+The scripted table is written to `advisor/ai3/eval_table.md`. Scripted mode measures
+the verifier, not a real LLM. Live mode requires an explicit model:
+
+```powershell
+$env:ADVISOR_MODEL = "<your-installed-tool-capable-model>"
+$env:OLLAMA_HOST = "http://localhost:11434"
+python -m advisor.ai3.evaluate --live
+```
+
+The live table is written to `advisor/ai3/eval_table_live.md`. Live mode sends only
+the question text and does not use the committed scripted answers.

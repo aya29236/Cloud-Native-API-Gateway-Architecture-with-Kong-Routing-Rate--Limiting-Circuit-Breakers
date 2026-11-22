@@ -1,7 +1,10 @@
 """Prompts and untrusted tool-result formatting for AI2."""
 
 import json
+from collections.abc import Mapping
 from typing import Any
+
+from pydantic import BaseModel
 
 
 SYSTEM_PROMPT = """Use tools to get data.
@@ -14,7 +17,20 @@ Never invent IPs, routes or numbers."""
 
 def tool_result_message(tool_name: str, result: Any) -> dict[str, str]:
     """Wrap tool output as a tool-role message; content is untrusted data."""
-    payload = json.dumps(result, ensure_ascii=False, sort_keys=True)
+    def json_safe(value: Any) -> Any:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json")
+        if isinstance(value, Mapping):
+            return {str(key): json_safe(nested) for key, nested in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [json_safe(nested) for nested in value]
+        return value
+
+    payload = json.dumps(
+        json_safe(result),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     content = (
         f'<tool_result name="{tool_name}">\n'
         f"{payload}\n"

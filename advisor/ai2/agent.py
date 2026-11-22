@@ -49,7 +49,17 @@ def _arguments_dict(arguments: Any) -> dict[str, Any]:
             return dict(parsed) if isinstance(parsed, dict) else {}
         except json.JSONDecodeError:
             return {}
-    return {}
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert Pydantic and list/dict values to JSON-safe trace data."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(nested) for key, nested in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(nested) for nested in value]
+    return value
 
 
 def analyze(
@@ -151,8 +161,9 @@ def analyze(
                 validated = argument_model.model_validate(arguments)
                 kwargs = validated.model_dump()
                 result = tool(records, **kwargs)
-                stats[tool_name] = result
-                result_summary = json.dumps(result, ensure_ascii=False, sort_keys=True)[:500]
+                safe_result = _json_safe(result)
+                stats[tool_name] = safe_result
+                result_summary = json.dumps(safe_result, ensure_ascii=False, sort_keys=True)
             except (ValidationError, ValueError, TypeError) as exc:
                 error = f"invalid arguments: {exc}"
                 result_summary = ""
@@ -190,7 +201,11 @@ def analyze(
     )
 
 
-def save_trace(response: AnalyzeResponse, directory: str = "advisor/traces") -> Path:
+def save_trace(
+    response: AnalyzeResponse,
+    directory: str = "advisor/traces",
+    extra: dict[str, Any] | None = None,
+) -> Path:
     """Save one JSON trace file with timestamp and question slug."""
     target = Path(directory)
     target.mkdir(parents=True, exist_ok=True)
@@ -203,6 +218,8 @@ def save_trace(response: AnalyzeResponse, directory: str = "advisor/traces") -> 
         "timestamp": timestamp.isoformat(),
         "response": response.model_dump(),
     }
+    if extra:
+        payload.update(extra)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
