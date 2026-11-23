@@ -23,12 +23,22 @@ def _unsupported_feedback(report: VerificationReport) -> str:
     )
 
 
+def _normalize_refusal(response: AnalyzeResponse) -> AnalyzeResponse:
+    summary = response.summary.strip()
+    candidate = summary[:-1] if summary.endswith(".") else summary
+    if candidate == "No verified data":
+        return response.model_copy(update={"summary": "No verified data"})
+    return response
+
+
 def analyze_verified_detailed(
     question: str,
     records: Sequence[ParsedLogRecord],
     client: LLMClient,
     max_steps: int = 6,
     save: bool = True,
+    trace_directory: str = "advisor/traces",
+    trace_extra: dict[str, Any] | None = None,
 ) -> tuple[AnalyzeResponse, VerificationReport, bool, int]:
     """Run AI2 once, retry once, and return response plus AI3 metadata."""
     delivered, report, retry_used, attempt_count, _first_report = (
@@ -38,6 +48,8 @@ def analyze_verified_detailed(
             client,
             max_steps,
             save,
+            trace_directory,
+            trace_extra,
         )
     )
     return delivered, report, retry_used, attempt_count
@@ -49,8 +61,10 @@ def _analyze_verified_with_reports(
     client: LLMClient,
     max_steps: int,
     save: bool,
+    trace_directory: str = "advisor/traces",
+    trace_extra: dict[str, Any] | None = None,
 ) -> tuple[AnalyzeResponse, VerificationReport, bool, int, VerificationReport]:
-    first = analyze(question, records, client, max_steps=max_steps)
+    first = _normalize_refusal(analyze(question, records, client, max_steps=max_steps))
     first_report = verify_answer(first.summary, first)
 
     if first_report.ok:
@@ -58,15 +72,20 @@ def _analyze_verified_with_reports(
         attempt_count = 1
         retry_used = False
         if save:
-            save_trace(
-                delivered,
-                extra={
+            extra = dict(trace_extra or {})
+            extra.update(
+                {
                     "verifier_report": first_report.model_dump(),
                     "verifier_reports": [first_report.model_dump()],
                     "attempt_count": attempt_count,
                     "retry_used": retry_used,
                     "fallback": False,
-                },
+                }
+            )
+            save_trace(
+                delivered,
+                directory=trace_directory,
+                extra=extra,
             )
         return delivered, first_report, retry_used, attempt_count, first_report
 
@@ -79,9 +98,9 @@ def _analyze_verified_with_reports(
         attempt_count = 1
         refusal_report = verify_answer(delivered.summary, delivered)
         if save:
-            save_trace(
-                delivered,
-                extra={
+            extra = dict(trace_extra or {})
+            extra.update(
+                {
                     "verifier_report": refusal_report.model_dump(),
                     "verifier_reports": [
                         first_report.model_dump(),
@@ -90,7 +109,12 @@ def _analyze_verified_with_reports(
                     "attempt_count": attempt_count,
                     "retry_used": retry_used,
                     "fallback": True,
-                },
+                }
+            )
+            save_trace(
+                delivered,
+                directory=trace_directory,
+                extra=extra,
             )
         return delivered, refusal_report, retry_used, attempt_count, first_report
 
@@ -98,11 +122,13 @@ def _analyze_verified_with_reports(
     retry_question = (
         f"{question}\n\n{_unsupported_feedback(first_report)}"
     )
-    second = analyze(
-        retry_question,
-        records,
-        client,
-        max_steps=remaining,
+    second = _normalize_refusal(
+        analyze(
+            retry_question,
+            records,
+            client,
+            max_steps=remaining,
+        )
     )
 
     combined_trace = list(first.tool_trace)
@@ -145,9 +171,9 @@ def _analyze_verified_with_reports(
 
     attempt_count = 2
     if save:
-        save_trace(
-            delivered,
-            extra={
+        extra = dict(trace_extra or {})
+        extra.update(
+            {
                 "verifier_report": delivered_report.model_dump(),
                 "verifier_reports": [
                     first_report.model_dump(),
@@ -156,7 +182,12 @@ def _analyze_verified_with_reports(
                 "attempt_count": attempt_count,
                 "retry_used": True,
                 "fallback": fallback,
-            },
+            }
+        )
+        save_trace(
+            delivered,
+            directory=trace_directory,
+            extra=extra,
         )
     return delivered, delivered_report, True, attempt_count, first_report
 

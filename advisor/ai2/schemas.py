@@ -26,10 +26,10 @@ from advisor.ai1.tools import (
 DESCRIPTIONS: dict[str, str] = {
     "time_range": "Read-only: return valid Kong log records inside an inclusive integer started_at range.",
     "status_breakdown": "Read-only: count HTTP response statuses, optionally inside an integer time range.",
-    "top_ips": "Read-only: count and rank client IPs deterministically.",
-    "top_routes": "Read-only: count and rank route names, with request URI fallback.",
-    "top_ip_route_pairs": "Read-only: count and rank client IP and route pairs.",
-    "consumer_stats": "Read-only: count Kong consumers, treating missing, null or empty usernames as anonymous.",
+    "top_ips": "Read-only: count and rank client IPs deterministically; only count records with this HTTP status when status is supplied.",
+    "top_routes": "Read-only: count and rank route names, with request URI fallback; only count records with this HTTP status when status is supplied.",
+    "top_ip_route_pairs": "Read-only: count and rank client IP and route pairs; only count records with this HTTP status when status is supplied.",
+    "consumer_stats": "Read-only: count Kong consumers, treating missing, null or empty usernames as anonymous; only count records with this HTTP status when status is supplied.",
     "get_log_lines": "Read-only: return at most 20 log records in physical line-ID order for citation.",
 }
 

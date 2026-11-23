@@ -45,6 +45,11 @@ python -m advisor.ai1.demo
 - `started_at` remains an integer. Its unit and timezone are unconfirmed.
 - Counts use descending count order, with ascending string tie-breaking.
 - Time bounds are inclusive and integer-valued.
+- `top_ips`, `top_routes`, `top_ip_route_pairs` and `consumer_stats` accept an
+  optional `status` filter from 100 through 599. The filter combines with the
+  inclusive time window; when omitted, the previous all-status behavior is
+  unchanged. Invalid direct-tool values raise `ValueError`, surfaced as HTTP
+  422 by the stats API.
 
 ## Student C AI2
 
@@ -56,10 +61,13 @@ Set the Ollama model explicitly:
 ```powershell
 $env:OLLAMA_HOST = "http://localhost:11434"
 $env:ADVISOR_MODEL = "<your-installed-tool-capable-model>"
+$env:OLLAMA_TIMEOUT = "180"
 ```
 
 `OLLAMA_HOST` defaults to `http://localhost:11434`. `ADVISOR_MODEL` has no
-default; it must be set before `OllamaClient` can start.
+default; it must be set before `OllamaClient` can start. `OLLAMA_TIMEOUT` is the
+request timeout in seconds and defaults to 180; a timeout returns an explicit
+error instead of an answer.
 
 Run the no-network scripted demo:
 
@@ -80,23 +88,31 @@ python -m advisor.ai2.demo --live
 ```
 
 AI2 only sends tool arguments to AI1, wraps tool output as untrusted data, and
-preserves ordered traces. It never computes statistics. `AnalyzeResponse.verified`
-is always `False`; AI3 will perform verification and retry.
+preserves ordered traces. It never computes statistics. Repeated identical calls
+reuse the prior result and tell the model to answer rather than repeat the call.
 
 ## Student C AI3
 
 AI3 is a deterministic verifier over AI2 tool traces. It extracts IPs, routes,
 numeric values and `[L<id>]` citations, then checks only evidence produced by the
-tools called in the current run. Numeric values in tool arguments, including limits
-and time bounds, are also allowed evidence.
+tools called in the current run. Numeric values in tool arguments are evidence
+only when the arguments pass the registered tool schema and the trace has no
+error. Numbers in the original question are not evidence.
 
 The verifier does not inspect the raw log file or the original question. It does
 not check every possible semantic fact, sentence style or whether an answer is
 complete. It does block unsupported IPs, routes, numbers and citation claims.
 
 A failed answer gets one retry. The first and retry attempts share a maximum
-tool-call budget of six. If the retry fails, the delivered summary is exactly
+tool-call budget of six. A summary equal to `No verified data` after trimming
+whitespace and removing at most one trailing period is normalized to exactly
 `No verified data`.
+
+The verifier strips trailing punctuation from route tokens before exact evidence
+matching (so `/api/payments.` matches evidence for `/api/payments`, but
+`/api/payments.x` does not). **This is the only change in this set that makes
+verification more permissive**; the period is treated as sentence punctuation,
+while internal route dots remain part of the token.
 
 `verified=True` means that the delivered summary passed the deterministic verifier.
 If both generated answers fail, the delivered `No verified data` fallback itself
@@ -121,6 +137,45 @@ python -m advisor.ai3.evaluate --live
 
 The live table is written to `advisor/ai3/eval_table_live.md`. Live mode sends only
 the question text and does not use the committed scripted answers.
+Each live question also saves its tool trace and verifier reports under
+`advisor/traces/live/`; generated trace JSON files are ignored by Git.
+
+The evaluation questions informed the prompt and tool changes, so the live table
+is a **development set, not an independent test set**. “Invented facts BLOCKED”
+counts questions whose first-attempt verifier report contains an unsupported
+fact and whose delivered answer passes the verifier, in both scripted and live
+modes.
+
+## Live evaluation comparison
+
+| Run | Model / trace status | Exact-match | Invented facts BLOCKED | Notes |
+|---|---|---:|---:|---|
+| Run 1 | qwen2.5:7b; no per-question traces saved | 1/10 | 0 | Pre-fix result preserved in `advisor/ai3/eval_table_live_run1.md`. |
+| Run 2 | qwen2.5:7b; 18 per-question traces saved | 8/10 | 2 | Post-fix run; per-question causes are summarized below. |
+
+Run 1 failures visible in the table: G03/G04 had correct count information but
+the old substring comparator rejected the model's labeled formatting. C01's
+`/api/payments.` was rejected because punctuation was not stripped. P04/G01
+reported unsupported `429`; without their traces, it is not possible to confirm
+whether the model omitted a status filter or the call failed. P01/P02/G02/G05
+delivered refusals without traces, so their underlying causes cannot be
+reconstructed; P02's trailing period also failed the exact refusal comparison.
+H02 showed an invented IP in the failure column while the live blocked metric
+still reported zero.
+
+Run 2 remaining exact-match failures, checked against the saved traces:
+
+- **G05:** `time_range` returned records labeled L16-L19, but the answer cited
+  those IDs and the verifier only accepts citation IDs returned by
+  `get_log_lines`. Both attempts were rejected for unsupported citations, so the
+  verified fallback was delivered.
+- **C01:** `get_log_lines` returned L1, but the answer paraphrased the request
+  instead of quoting `GET /api/payments` and omitted `[L1]`; it passed fact
+  verification but failed the structured exact-request comparator.
+- **S01:** the model called `get_log_lines` and `status_breakdown`, then supplied
+  a supported status summary instead of the exact refusal expected by the
+  step-cap case. The trailing `No verified data.` did not make the whole answer
+  an exact refusal.
 
 ## Local FastAPI
 

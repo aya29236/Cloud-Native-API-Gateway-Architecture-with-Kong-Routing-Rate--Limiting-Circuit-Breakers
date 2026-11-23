@@ -138,9 +138,10 @@ def read_top_ips(
     limit: int = Query(default=10),
     start_at: int | None = Query(default=None),
     end_at: int | None = Query(default=None),
+    status: int | None = Query(default=None),
     records: list[ParsedLogRecord] = Depends(get_records),
 ) -> list[dict[str, Any]]:
-    return _call_tool(top_ips, records, limit, start_at, end_at)
+    return _call_tool(top_ips, records, limit, start_at, end_at, status)
 
 
 @router.get("/top-routes", response_model=TopRoutesResponse)
@@ -148,9 +149,10 @@ def read_top_routes(
     limit: int = Query(default=10),
     start_at: int | None = Query(default=None),
     end_at: int | None = Query(default=None),
+    status: int | None = Query(default=None),
     records: list[ParsedLogRecord] = Depends(get_records),
 ) -> list[dict[str, Any]]:
-    return _call_tool(top_routes, records, limit, start_at, end_at)
+    return _call_tool(top_routes, records, limit, start_at, end_at, status)
 
 
 @router.get("/top-pairs", response_model=TopPairsResponse)
@@ -158,18 +160,20 @@ def read_top_pairs(
     limit: int = Query(default=10),
     start_at: int | None = Query(default=None),
     end_at: int | None = Query(default=None),
+    status: int | None = Query(default=None),
     records: list[ParsedLogRecord] = Depends(get_records),
 ) -> list[dict[str, Any]]:
-    return _call_tool(top_ip_route_pairs, records, limit, start_at, end_at)
+    return _call_tool(top_ip_route_pairs, records, limit, start_at, end_at, status)
 
 
 @router.get("/consumers", response_model=ConsumersResponse)
 def read_consumers(
     start_at: int | None = Query(default=None),
     end_at: int | None = Query(default=None),
+    status: int | None = Query(default=None),
     records: list[ParsedLogRecord] = Depends(get_records),
 ) -> list[dict[str, Any]]:
-    return _call_tool(consumer_stats, records, start_at, end_at)
+    return _call_tool(consumer_stats, records, start_at, end_at, status)
 
 
 @router.get("/time-range", response_model=TimeRangeResponse)

@@ -519,6 +519,83 @@ def test_generator_is_deterministic_and_follows_c2():
     assert result.malformed_count == 1
 
 
+@pytest.mark.parametrize(
+    ("tool", "group_fields", "output_fields"),
+    [
+        (top_ips, ["client_ip"], ["client_ip"]),
+        (top_routes, ["route"], ["route"]),
+        (top_ip_route_pairs, ["client_ip", "route"], ["client_ip", "route"]),
+        (consumer_stats, ["consumer"], ["consumer"]),
+    ],
+)
+def test_status_filtered_tools_match_independent_pandas(
+    tool,
+    group_fields,
+    output_fields,
+):
+    pandas = pytest.importorskip("pandas")
+    text, raw_records, _expected = generate_synthetic_logs(seed=2026)
+    records = read_kong_log_text(text).records
+    frame = pandas.DataFrame(
+        [
+            {
+                "status": raw["response"]["status"],
+                "started_at": raw["started_at"],
+                "client_ip": raw["client_ip"],
+                "route": (
+                    raw["route"]["name"]
+                    if raw.get("route") is not None and raw["route"].get("name")
+                    else raw["request"]["uri"]
+                ),
+                "consumer": (
+                    raw["consumer"]["username"]
+                    if raw.get("consumer") is not None
+                    and raw["consumer"].get("username")
+                    else "anonymous"
+                ),
+            }
+            for raw in raw_records
+        ]
+    )
+
+    def pandas_result(selected):
+        grouped = selected.groupby(group_fields).size().reset_index(name="count")
+        grouped = grouped.sort_values(
+            ["count", *group_fields],
+            ascending=[False, *([True] * len(group_fields))],
+            kind="stable",
+        )
+        return [
+            {
+                **{field: row[field] for field in output_fields},
+                "count": int(row["count"]),
+            }
+            for row in grouped.to_dict(orient="records")
+        ]
+
+    status_frame = frame[frame["status"] == 429]
+    assert tool(records, status=429) == pandas_result(status_frame)
+
+    time_frame = status_frame[
+        (status_frame["started_at"] >= 1005)
+        & (status_frame["started_at"] <= 1024)
+    ]
+    assert tool(records, start_at=1005, end_at=1024, status=429) == pandas_result(
+        time_frame
+    )
+    assert tool(records, status=418) == []
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [top_ips, top_routes, top_ip_route_pairs, consumer_stats],
+)
+@pytest.mark.parametrize("status", [0, 99, 600, True, 1.5])
+def test_status_filter_rejects_invalid_values(tool, status):
+    with pytest.raises(ValueError, match="status"):
+        tool(synthetic_result().records, status=status)
+
+
 def test_generator_has_known_optional_field_variants():
     _text, raw, _expected = generate_synthetic_logs()
     assert any("consumer" not in record for record in raw)

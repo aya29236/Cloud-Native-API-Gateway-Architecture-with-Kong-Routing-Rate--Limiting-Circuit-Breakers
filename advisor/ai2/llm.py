@@ -1,6 +1,7 @@
 """Small Ollama and scripted LLM clients for AI2."""
 
 import json
+import math
 import os
 import urllib.error
 import urllib.request
@@ -24,11 +25,22 @@ class OllamaClient:
         self,
         host: str | None = None,
         model: str | None = None,
-        timeout: float = 30.0,
+        timeout: float | None = None,
     ) -> None:
         self.host = (host or os.getenv("OLLAMA_HOST", "http://localhost:11434")).rstrip("/")
         self.model = model or os.getenv("ADVISOR_MODEL")
-        self.timeout = timeout
+        timeout_value = timeout
+        if timeout_value is None:
+            raw_timeout = os.getenv("OLLAMA_TIMEOUT", "180")
+            try:
+                timeout_value = float(raw_timeout)
+            except ValueError as exc:
+                raise RuntimeError(
+                    "OLLAMA_TIMEOUT must be a positive number of seconds."
+                ) from exc
+        if not math.isfinite(timeout_value) or timeout_value <= 0:
+            raise RuntimeError("OLLAMA_TIMEOUT must be a positive number of seconds.")
+        self.timeout = timeout_value
         if not self.model:
             raise RuntimeError(
                 "ADVISOR_MODEL is not set. Set ADVISOR_MODEL to an Ollama model name."
@@ -56,12 +68,18 @@ class OllamaClient:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise RuntimeError(
+                    f"Ollama request timed out after {self.timeout:g} seconds "
+                    f"at {self.host}/api/chat"
+                ) from exc
             raise RuntimeError(
                 f"Cannot reach Ollama at {self.host}/api/chat: {exc.reason}"
             ) from exc
         except TimeoutError as exc:
             raise RuntimeError(
-                f"Ollama request timed out at {self.host}/api/chat"
+                f"Ollama request timed out after {self.timeout:g} seconds "
+                f"at {self.host}/api/chat"
             ) from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError("Ollama returned invalid JSON") from exc

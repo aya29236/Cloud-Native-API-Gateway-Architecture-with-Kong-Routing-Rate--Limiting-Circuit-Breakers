@@ -18,7 +18,7 @@ from advisor.ai2.agent import (
 )
 from advisor.ai2.llm import OllamaClient, ScriptedClient
 from advisor.ai2.prompts import SYSTEM_PROMPT, tool_result_message
-from advisor.ai2.schemas import TOOL_REGISTRY, build_tool_definitions
+from advisor.ai2.schemas import DESCRIPTIONS, TOOL_REGISTRY, build_tool_definitions
 
 
 def records():
@@ -66,6 +66,40 @@ def test_two_questions_have_different_traces():
     assert [item["tool"] for item in first.tool_trace] == ["top_ips"]
     assert [item["tool"] for item in second.tool_trace] == ["top_routes"]
     assert first.tool_trace != second.tool_trace
+
+
+def test_identical_normalized_tool_call_reuses_result_and_counts_as_step():
+    class CapturingScriptedClient(ScriptedClient):
+        def __init__(self, messages):
+            super().__init__(messages)
+            self.received_messages = []
+
+        def chat(self, messages, tools):
+            self.received_messages.append(copy.deepcopy(list(messages)))
+            return super().chat(messages, tools)
+
+    client = CapturingScriptedClient(
+        [
+            tool_call("top_ips", {"limit": 1}),
+            tool_call(
+                "top_ips",
+                {
+                    "end_at": None,
+                    "limit": 1,
+                    "status": None,
+                    "start_at": None,
+                },
+            ),
+            {"role": "assistant", "content": "198.51.100.44"},
+        ]
+    )
+    response = analyze("Which IP?", records(), client)
+
+    assert [entry["step"] for entry in response.tool_trace] == [1, 2]
+    assert [entry["tool"] for entry in response.tool_trace] == ["top_ips", "top_ips"]
+    assert response.tool_trace[0]["result_summary"] == response.tool_trace[1]["result_summary"]
+    assert response.tool_trace[1]["note"] == "duplicate call: answer now"
+    assert "duplicate call: answer now" in client.received_messages[2][-1]["content"]
 
 
 def test_tool_schemas_are_valid_json_schema_and_match_models():
@@ -278,6 +312,37 @@ def test_ollama_request_temperature_tools_and_model(monkeypatch):
     assert payload["tools"] == build_tool_definitions()
 
 
+def test_ollama_timeout_uses_environment_default(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["timeout"] = timeout
+        return MockUrlResponse(
+            {"message": {"role": "assistant", "content": "done"}}
+        )
+
+    monkeypatch.setenv("ADVISOR_MODEL", "test-model")
+    monkeypatch.setenv("OLLAMA_TIMEOUT", "12.5")
+    client = OllamaClient()
+    with patch("advisor.ai2.llm.urllib.request.urlopen", fake_urlopen):
+        client.chat([], [])
+    assert captured["timeout"] == 12.5
+
+
+def test_ollama_timeout_defaults_to_180_seconds(monkeypatch):
+    monkeypatch.setenv("ADVISOR_MODEL", "test-model")
+    monkeypatch.delenv("OLLAMA_TIMEOUT", raising=False)
+    assert OllamaClient().timeout == 180
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-1", "inf"])
+def test_ollama_timeout_rejects_invalid_environment_values(monkeypatch, value):
+    monkeypatch.setenv("ADVISOR_MODEL", "test-model")
+    monkeypatch.setenv("OLLAMA_TIMEOUT", value)
+    with pytest.raises(RuntimeError, match="OLLAMA_TIMEOUT"):
+        OllamaClient()
+
+
 def test_ollama_missing_model_raises_clear_error(monkeypatch):
     monkeypatch.delenv("ADVISOR_MODEL", raising=False)
     with pytest.raises(RuntimeError, match="ADVISOR_MODEL"):
@@ -295,6 +360,16 @@ def test_ollama_network_error_is_controlled(monkeypatch):
     with patch("advisor.ai2.llm.urllib.request.urlopen", unreachable):
         with pytest.raises(RuntimeError, match="timed out"):
             client.chat([], [])
+
+
+def test_system_prompt_contains_tool_selection_and_citation_rules():
+    assert "Pick the tool that matches the question" in SYSTEM_PROMPT
+    assert "status-specific questions use the status filter" in SYSTEM_PROMPT
+    assert "Never call the same tool with the same arguments twice" in SYSTEM_PROMPT
+    assert "After the tool results arrive, write the final answer" in SYSTEM_PROMPT
+    assert "When quoting a log line, cite [L<id>]" in SYSTEM_PROMPT
+    for name in ("top_ips", "top_routes", "top_ip_route_pairs", "consumer_stats"):
+        assert "only count records with this HTTP status" in DESCRIPTIONS[name]
 
 
 def test_save_trace_writes_json(tmp_path):

@@ -6,15 +6,17 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from advisor.ai2.agent import AnalyzeResponse
+from advisor.ai2.schemas import TOOL_REGISTRY
 
 
 IP_RE = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 CITATION_RE = re.compile(r"\[L([1-9][0-9]*)\]")
 PATH_RE = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*")
 NUMBER_RE = re.compile(r"(?<![\w.])[-+]?(?:\d+\.\d+|\d+(?![\d.]))(?![\w.])")
+TRAILING_ROUTE_PUNCTUATION = ".,;:!?)"
 
 
 class ExtractedFacts(BaseModel):
@@ -80,12 +82,22 @@ def build_evidence(
 
     for trace in response.tool_trace:
         arguments = trace.get("arguments")
-        if isinstance(arguments, Mapping):
-            for value in _values(arguments):
-                if _is_number(value):
-                    numbers.add(_canonical_number(value))
-
         tool_name = trace.get("tool")
+        if (
+            not trace.get("error")
+            and tool_name in TOOL_REGISTRY
+            and isinstance(arguments, Mapping)
+        ):
+            argument_model, _tool = TOOL_REGISTRY[tool_name]
+            try:
+                argument_model.model_validate(arguments)
+            except ValidationError:
+                pass
+            else:
+                for value in _values(arguments):
+                    if _is_number(value):
+                        numbers.add(_canonical_number(value))
+
         summary = trace.get("result_summary", "")
         if not isinstance(summary, str) or not summary:
             continue
@@ -143,15 +155,27 @@ def build_evidence(
     return ips, routes, numbers, citations, line_records
 
 
-def extract_facts(answer: str, evidence_routes: set[str]) -> ExtractedFacts:
-    ips = sorted(set(IP_RE.findall(answer)))
-
-    routes = set(PATH_RE.findall(answer))
+def _extract_routes(answer: str, evidence_routes: set[str]) -> set[str]:
+    routes = {
+        token.rstrip(TRAILING_ROUTE_PUNCTUATION)
+        for token in PATH_RE.findall(answer)
+    }
+    routes.discard("")
     for route in evidence_routes:
         if route.startswith("/"):
             continue
-        if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(route)}(?![A-Za-z0-9_-])", answer):
+        if re.search(
+            rf"(?<![A-Za-z0-9_.-]){re.escape(route)}"
+            rf"(?:[.,;:!?)])?(?![A-Za-z0-9_.-])",
+            answer,
+        ):
             routes.add(route)
+    return routes
+
+
+def extract_facts(answer: str, evidence_routes: set[str]) -> ExtractedFacts:
+    ips = sorted(set(IP_RE.findall(answer)))
+    routes = _extract_routes(answer, evidence_routes)
 
     masked = IP_RE.sub(" ", answer)
     masked = CITATION_RE.sub(" ", masked)
@@ -264,12 +288,7 @@ def verify_answer(answer: str, response: AnalyzeResponse) -> VerificationReport:
         if not cited:
             continue
         ips_in_sentence = IP_RE.findall(sentence)
-        routes_in_sentence = set(PATH_RE.findall(sentence))
-        for route in routes:
-            if route.startswith("/") or not route:
-                continue
-            if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(route)}(?![A-Za-z0-9_-])", sentence):
-                routes_in_sentence.add(route)
+        routes_in_sentence = _extract_routes(sentence, routes)
         for line_number in cited:
             line_id = f"L{line_number}"
             record = line_records.get(line_id)

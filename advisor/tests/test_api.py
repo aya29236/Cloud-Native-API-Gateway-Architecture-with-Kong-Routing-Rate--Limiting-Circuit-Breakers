@@ -253,6 +253,36 @@ def test_stats_routes_are_get_only():
     assert response.status_code == 405
 
 
+def test_status_query_filters_four_stats_routes_and_maps_invalid_status():
+    _text, _raw, parsed = _data()
+    records = parsed.records
+    app = _stats_app(records)
+    with TestClient(app) as client:
+        assert client.get("/stats/top-ips?status=429").json() == top_ips(
+            records, status=429
+        )
+        assert client.get("/stats/top-routes?status=503").json() == top_routes(
+            records, status=503
+        )
+        assert client.get("/stats/top-pairs?status=429").json() == top_ip_route_pairs(
+            records, status=429
+        )
+        assert client.get(
+            "/stats/consumers?status=429&start_at=1005&end_at=1007"
+        ).json() == consumer_stats(
+            records, 1005, 1007, status=429
+        )
+        assert client.get("/stats/top-ips?status=418").json() == []
+        for endpoint in (
+            "/stats/top-ips",
+            "/stats/top-routes",
+            "/stats/top-pairs",
+            "/stats/consumers",
+        ):
+            response = client.get(f"{endpoint}?status=600")
+            assert response.status_code == 422
+
+
 def test_analyze_returns_exact_c1_shape_and_verified_semantics(monkeypatch):
     import advisor.ai3.pipeline as pipeline
 
@@ -261,7 +291,7 @@ def test_analyze_returns_exact_c1_shape_and_verified_semantics(monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "save_trace",
-        lambda response, extra=None: saved_traces.append((response, extra)),
+        lambda response, directory="advisor/traces", extra=None: saved_traces.append((response, extra)),
     )
     client_script = ScriptedClient(
         [
@@ -296,7 +326,7 @@ def test_analyze_failed_retry_delivers_verified_refusal_and_saves_fallback(
     monkeypatch.setattr(
         pipeline,
         "save_trace",
-        lambda response, extra=None: saved_traces.append((response, extra)),
+        lambda response, directory="advisor/traces", extra=None: saved_traces.append((response, extra)),
     )
     scripted = ScriptedClient(
         [

@@ -3,7 +3,7 @@
 Scripted mode measures the verifier, not a real model.
 
 | id | category | question | expected | answer delivered | verified | retry used | correct? | failure/blocked reason |
-|---|---|---|---|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|---|---|
 | P01 | paraphrases | Which IP sent the most 429 responses? | 198.51.100.44 | 198.51.100.44 | true | false | true |  |
 | P02 | paraphrases | Name the source IP producing the largest 429 count. | 198.51.100.44 | 198.51.100.44 | true | false | true |  |
 | P03 | paraphrases | For HTTP 429, what IP appears most often? | 198.51.100.44 | 198.51.100.44 | true | false | true |  |

@@ -85,6 +85,7 @@ def analyze(
     tools = build_tool_definitions()
     tool_trace: list[dict[str, Any]] = []
     stats: dict[str, Any] = {}
+    tool_cache: dict[tuple[str, str], tuple[Any, str, str]] = {}
     answer = ""
 
     for loop_step in range(1, max_steps + 1):
@@ -137,9 +138,19 @@ def analyze(
             error = ""
             result: Any = None
             result_summary = ""
+            duplicate = False
 
             if tool_name not in TOOL_REGISTRY:
                 error = f"unknown tool: {tool_name}"
+                cache_key = (
+                    tool_name,
+                    json.dumps(arguments, sort_keys=True, separators=(",", ":"), default=str),
+                )
+                if cache_key in tool_cache:
+                    result, result_summary, error = tool_cache[cache_key]
+                    duplicate = True
+                else:
+                    tool_cache[cache_key] = (result, result_summary, error)
                 tool_trace.append(
                     {
                         "step": step,
@@ -147,12 +158,21 @@ def analyze(
                         "arguments": arguments,
                         "result_summary": "",
                         "error": error,
+                        **({"note": "duplicate call: answer now"} if duplicate else {}),
                     }
                 )
                 messages.append(
                     tool_result_message(
                         tool_name,
-                        {"error": error},
+                        (
+                            {
+                                "result": result,
+                                "error": error,
+                                "note": "duplicate call: answer now",
+                            }
+                            if duplicate
+                            else {"error": error}
+                        ),
                     )
                 )
                 continue
@@ -161,15 +181,38 @@ def analyze(
             try:
                 validated = argument_model.model_validate(arguments)
                 kwargs = validated.model_dump()
-                result = tool(records, **kwargs)
-                safe_result = _json_safe(result)
-                stats[tool_name] = safe_result
-                result_summary = json.dumps(safe_result, ensure_ascii=False, sort_keys=True)
-            except (ValidationError, ValueError, TypeError) as exc:
-                error = f"invalid arguments: {exc}"
-                result_summary = ""
-                if isinstance(exc, ValidationError):
-                    error = f"invalid arguments: {exc.errors(include_url=False)}"
+                cache_key = (
+                    tool_name,
+                    json.dumps(kwargs, sort_keys=True, separators=(",", ":"), default=str),
+                )
+                if cache_key in tool_cache:
+                    result, result_summary, error = tool_cache[cache_key]
+                    duplicate = True
+                else:
+                    try:
+                        result = tool(records, **kwargs)
+                    except (ValueError, TypeError) as exc:
+                        error = f"invalid arguments: {exc}"
+                    else:
+                        result = _json_safe(result)
+                        stats[tool_name] = result
+                        result_summary = json.dumps(
+                            result,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                    tool_cache[cache_key] = (result, result_summary, error)
+            except ValidationError as exc:
+                error = f"invalid arguments: {exc.errors(include_url=False)}"
+                raw_key = (
+                    tool_name,
+                    json.dumps(arguments, sort_keys=True, separators=(",", ":"), default=str),
+                )
+                if raw_key in tool_cache:
+                    result, result_summary, error = tool_cache[raw_key]
+                    duplicate = True
+                else:
+                    tool_cache[raw_key] = (result, result_summary, error)
 
             tool_trace.append(
                 {
@@ -178,12 +221,21 @@ def analyze(
                     "arguments": arguments,
                     "result_summary": result_summary,
                     "error": error,
+                    **({"note": "duplicate call: answer now"} if duplicate else {}),
                 }
             )
             messages.append(
                 tool_result_message(
                     tool_name,
-                    result if not error else {"error": error},
+                    (
+                        {
+                            "result": result,
+                            "error": error,
+                            "note": "duplicate call: answer now",
+                        }
+                        if duplicate
+                        else result if not error else {"error": error}
+                    ),
                 )
             )
     else:

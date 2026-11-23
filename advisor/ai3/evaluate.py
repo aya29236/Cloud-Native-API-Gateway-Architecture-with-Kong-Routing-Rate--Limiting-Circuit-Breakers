@@ -13,10 +13,22 @@ from advisor.ai1.generator import generate_synthetic_logs
 from advisor.ai1.reader import read_kong_log_text
 from advisor.ai2.llm import OllamaClient, ScriptedClient
 from advisor.ai3.eval_set import load_eval_questions
+from advisor.ai3.verifier import NUMBER_RE
 
 
 SCRIPT_TABLE = Path(__file__).with_name("eval_table.md")
 LIVE_TABLE = Path(__file__).with_name("eval_table_live.md")
+LIVE_TRACE_DIR = Path(__file__).parents[1] / "traces" / "live"
+
+STATUS_PAIR_RE = re.compile(
+    r"(?<!\d)(?P<status>\d{3})(?:\s+[A-Za-z][A-Za-z -]*?)?\s*:\s*"
+    r"(?P<count>\d+)(?!\d)"
+)
+CONSUMER_PAIR_RE = re.compile(
+    r"(?<![A-Za-z0-9_])`?(?P<consumer>[A-Za-z0-9_.-]+)`?"
+    r"(?:\s+consumers?)?\s*:\s*(?P<count>\d+)(?!\d)"
+)
+ROUTE_NAME_RE = re.compile(r"(?<![A-Za-z0-9_.-])[A-Za-z0-9_.-]+")
 
 
 def ground_truth(raw: list[dict[str, Any]]) -> dict[str, Any]:
@@ -174,23 +186,70 @@ def answer_matches(expected_kind: str, expected: dict[str, Any], answer: str) ->
     if expected_kind == "refusal":
         return answer == "No verified data"
     if expected_kind == "top_429_ip":
-        return expected["top429_ip"] in answer
+        return expected["top429_ip"] in set(re.findall(
+            r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?!\d)(?!\.\d)",
+            answer,
+        ))
     if expected_kind == "top_503_route":
-        return expected["top503_route"] in answer
+        expected_route = expected["top503_route"]
+        if expected_route.startswith("/"):
+            candidates = re.findall(r"/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*", answer)
+        else:
+            candidates = ROUTE_NAME_RE.findall(answer)
+        return expected_route in {
+            token.rstrip(".,;:!?)") for token in candidates
+        }
     if expected_kind == "status_breakdown":
-        return all(
-            f"{status}:{count}" in re.sub(r"\s+", "", answer).replace(" ", "")
+        observed: dict[int, int] = {}
+        for match in STATUS_PAIR_RE.finditer(answer):
+            status = int(match.group("status"))
+            count = int(match.group("count"))
+            if status in observed and observed[status] != count:
+                return False
+            observed[status] = count
+        wanted = {
+            int(status): int(count)
             for status, count in expected["status_breakdown"].items()
-        )
+        }
+        return observed == wanted
     if expected_kind == "consumer_stats":
-        return all(
-            f"{consumer}:{count}" in re.sub(r"\s+", "", answer).replace(" ", "")
+        observed: dict[str, int] = {}
+        for match in CONSUMER_PAIR_RE.finditer(answer):
+            consumer = match.group("consumer")
+            count = int(match.group("count"))
+            if consumer in observed and observed[consumer] != count:
+                return False
+            observed[consumer] = count
+        wanted = {
+            str(consumer): int(count)
             for consumer, count in expected["consumer_stats"].items()
-        )
+        }
+        return observed == wanted
     if expected_kind == "time_range":
-        return all(str(value) in answer for value in expected["time_range"])
+        values = [int(value) for value in expected["time_range"]]
+        if not values:
+            return not NUMBER_RE.findall(answer)
+        lower, upper = min(values), max(values)
+        observed: list[int | float] = []
+        for number in NUMBER_RE.findall(answer):
+            value = float(number) if "." in number else int(number)
+            if lower <= value <= upper:
+                observed.append(value)
+        return sorted(observed) == sorted(values)
     if expected_kind == "line_request":
-        return expected["line_request"] in answer and "[L1]" in answer
+        method, uri = expected["line_request"].split(" ", 1)
+        uri_token = uri.rstrip(".,;:!?)")
+        request_pattern = (
+            r"(?<![A-Za-z0-9_-])"
+            + re.escape(method)
+            + r"\s+"
+            + re.escape(uri_token)
+            + r"(?:[.,;:!?)])?(?![A-Za-z0-9_/-])(?!\.[A-Za-z0-9_])"
+        )
+        return (
+            re.search(request_pattern, answer) is not None
+            and re.search(r"\[L[1-9][0-9]*\]", answer) is not None
+        )
     return False
 
 
@@ -279,7 +338,7 @@ def render_table(
         title,
         "",
         "| id | category | question | expected | answer delivered | verified | retry used | correct? | failure/blocked reason |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         lines.append(
@@ -328,8 +387,6 @@ def run_scripted() -> tuple[list[dict[str, Any]], str]:
     parsed = read_kong_log_text(text).records
     truths = ground_truth(raw)
     rows: list[dict[str, Any]] = []
-    blocked = 0
-
     for item in load_eval_questions():
         kind = item["expected_kind"]
         expected = _expected_for_question(kind, truths)
@@ -346,11 +403,19 @@ def run_scripted() -> tuple[list[dict[str, Any]], str]:
             save=False,
         )
         correct = answer_matches(kind, truths, response.summary)
-        bad_first_blocked = bool(
-            item["bad_first"] and retry_used
+        has_unsupported_facts = any(
+            issue.kind in {
+                "unsupported_ip",
+                "unsupported_number",
+                "unsupported_route",
+                "unsupported_citation",
+                "citation_claim",
+            }
+            for issue in first_report.issues
         )
-        if bad_first_blocked:
-            blocked += 1
+        bad_first_blocked = bool(
+            has_unsupported_facts and response.verified and report.ok
+        )
         rows.append(
             {
                 "id": item["id"],
@@ -400,7 +465,13 @@ def run_live() -> tuple[list[dict[str, Any]], str]:
                 parsed,
                 client,
                 6,
-                save=False,
+                save=True,
+                trace_directory=str(LIVE_TRACE_DIR),
+                trace_extra={
+                    "question_id": item["id"],
+                    "question": item["question"],
+                    "expected_kind": item["expected_kind"],
+                },
             )
         except Exception as exc:
             print(f"Live evaluation unavailable: {exc}")
@@ -420,7 +491,20 @@ def run_live() -> tuple[list[dict[str, Any]], str]:
                 "first_verified": first_report.ok,
                 "answerable": kind != "refusal",
                 "failure_reason": _failure_reason(first_report),
-                "bad_first_blocked": False,
+                "bad_first_blocked": bool(
+                    any(
+                        issue.kind in {
+                            "unsupported_ip",
+                            "unsupported_number",
+                            "unsupported_route",
+                            "unsupported_citation",
+                            "citation_claim",
+                        }
+                        for issue in first_report.issues
+                    )
+                    and response.verified
+                    and report.ok
+                ),
             }
         )
     table = render_table(

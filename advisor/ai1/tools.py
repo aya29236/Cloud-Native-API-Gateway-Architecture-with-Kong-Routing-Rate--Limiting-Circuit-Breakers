@@ -4,7 +4,7 @@ from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import ParsedLogRecord
 
@@ -27,23 +27,47 @@ class TopIPsArgs(ToolArgumentModel):
     limit: int = 10
     start_at: int | None = None
     end_at: int | None = None
+    status: int | None = Field(
+        default=None,
+        ge=100,
+        le=599,
+        description="Only count records with this HTTP status.",
+    )
 
 
 class TopRoutesArgs(ToolArgumentModel):
     limit: int = 10
     start_at: int | None = None
     end_at: int | None = None
+    status: int | None = Field(
+        default=None,
+        ge=100,
+        le=599,
+        description="Only count records with this HTTP status.",
+    )
 
 
 class TopIPRoutePairsArgs(ToolArgumentModel):
     limit: int = 10
     start_at: int | None = None
     end_at: int | None = None
+    status: int | None = Field(
+        default=None,
+        ge=100,
+        le=599,
+        description="Only count records with this HTTP status.",
+    )
 
 
 class ConsumerStatsArgs(ToolArgumentModel):
     start_at: int | None = None
     end_at: int | None = None
+    status: int | None = Field(
+        default=None,
+        ge=100,
+        le=599,
+        description="Only count records with this HTTP status.",
+    )
 
 
 class GetLogLinesArgs(ToolArgumentModel):
@@ -72,10 +96,20 @@ def _validate_limit(limit: int) -> None:
         raise ValueError("limit must be non-negative")
 
 
+def _validate_status(status: int | None) -> None:
+    if status is None:
+        return
+    if isinstance(status, bool) or not isinstance(status, int):
+        raise ValueError("status must be an integer")
+    if not 100 <= status <= 599:
+        raise ValueError("status must be between 100 and 599")
+
+
 def _filter_time(
     records: Iterable[ParsedLogRecord],
     start_at: int | None = None,
     end_at: int | None = None,
+    status: int | None = None,
 ) -> list[ParsedLogRecord]:
     """Filter on inclusive integer ``started_at`` bounds."""
     return [
@@ -83,6 +117,7 @@ def _filter_time(
         for item in records
         if (start_at is None or item.record.started_at >= start_at)
         and (end_at is None or item.record.started_at <= end_at)
+        and (status is None or item.record.response.status == status)
     ]
 
 
@@ -115,13 +150,15 @@ def top_ips(
     limit: int = 10,
     start_at: int | None = None,
     end_at: int | None = None,
+    status: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Return IP counts ordered by count descending, then IP ascending."""
+    """Return IP counts filtered by status/time, with deterministic ordering."""
     _validate_limit(limit)
     _validate_bounds(start_at, end_at)
+    _validate_status(status)
     counts = Counter(
         item.record.client_ip
-        for item in _filter_time(records, start_at, end_at)
+        for item in _filter_time(records, start_at, end_at, status)
     )
     ranked = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
     return [
@@ -146,13 +183,15 @@ def top_routes(
     limit: int = 10,
     start_at: int | None = None,
     end_at: int | None = None,
+    status: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return route counts with route-name/URI fallback and stable tie-breaks."""
     _validate_limit(limit)
     _validate_bounds(start_at, end_at)
+    _validate_status(status)
     counts = Counter(
         _route_name(item)
-        for item in _filter_time(records, start_at, end_at)
+        for item in _filter_time(records, start_at, end_at, status)
     )
     ranked = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
     return [
@@ -166,13 +205,15 @@ def top_ip_route_pairs(
     limit: int = 10,
     start_at: int | None = None,
     end_at: int | None = None,
+    status: int | None = None,
 ) -> list[dict[str, Any]]:
     """Count (client_ip, route) pairs with count/IP/route stable ordering."""
     _validate_limit(limit)
     _validate_bounds(start_at, end_at)
+    _validate_status(status)
     counts = Counter(
         (item.record.client_ip, _route_name(item))
-        for item in _filter_time(records, start_at, end_at)
+        for item in _filter_time(records, start_at, end_at, status)
     )
     ranked = sorted(
         counts.items(),
@@ -188,6 +229,7 @@ def consumer_stats(
     records: Iterable[ParsedLogRecord],
     start_at: int | None = None,
     end_at: int | None = None,
+    status: int | None = None,
 ) -> list[dict[str, Any]]:
     """Count consumers; missing, null and empty usernames map to ``anonymous``.
 
@@ -196,8 +238,9 @@ def consumer_stats(
     aggregation convention does not rewrite or normalize C2 fields.
     """
     _validate_bounds(start_at, end_at)
+    _validate_status(status)
     counts = Counter()
-    for item in _filter_time(records, start_at, end_at):
+    for item in _filter_time(records, start_at, end_at, status):
         consumer = (
             item.record.consumer.username
             if item.record.consumer is not None
