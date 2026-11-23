@@ -121,3 +121,45 @@ python -m advisor.ai3.evaluate --live
 
 The live table is written to `advisor/ai3/eval_table_live.md`. Live mode sends only
 the question text and does not use the committed scripted answers.
+
+## Local FastAPI
+
+Install the API dependencies from the repository root and start the standalone
+app:
+
+```powershell
+python -m pip install -r advisor/requirements-api.txt
+uvicorn advisor.api.app:app --reload
+```
+
+Swagger UI is available at `http://127.0.0.1:8000/docs`; `GET /health` reports
+whether requests use `synthetic` or `kong-log` data. If `KONG_LOG_PATH` is unset
+or points to a missing file, this local app creates a seeded synthetic JSONL file
+in the system temporary directory for its lifetime. Otherwise it reads the
+configured Kong log. The reusable stats router itself returns HTTP 503 when its
+configured log file is unavailable.
+
+Configuration:
+
+- `KONG_LOG_PATH`: access-log path; defaults to `/var/log/kong/access.json` for
+  the reusable router.
+- `OLLAMA_HOST`: Ollama base URL; defaults to `http://localhost:11434`.
+- `ADVISOR_MODEL`: required Ollama model name for `POST /analyze`.
+
+Aya can include the routers in her existing FastAPI shell without changing it:
+
+```python
+from advisor.api import analyze_router, stats_router
+
+app.include_router(stats_router)
+app.include_router(analyze_router)
+```
+
+When running in Docker, set `OLLAMA_HOST` to a hostname reachable from the
+container, such as the host gateway or the Ollama service name; `localhost`
+inside the API container refers to that container itself.
+
+`GET /stats/*` endpoints invoke only read-only deterministic AI1 tools and do
+not use an LLM. `/analyze` returns the existing C1 fields and uses AI3
+verification; unavailable or unconfigured Ollama service/model errors return
+HTTP 503 rather than a fabricated answer.
