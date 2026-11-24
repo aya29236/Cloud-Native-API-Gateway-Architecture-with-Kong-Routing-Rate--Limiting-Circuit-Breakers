@@ -286,6 +286,51 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
     Finish $ok
   }
 
+  '23' {
+    Wait-Kong
+
+    Show 'python scripts/verify_metrics_contract.py'
+    $verify = python scripts/verify_metrics_contract.py 2>&1
+    $verify | ForEach-Object { Write-Host $_ }
+
+    Show 'promtool check config monitoring/prometheus.yml (prom/prometheus:v3.16.0)'
+    $promCfg = docker run --rm --entrypoint promtool `
+      -v "${PWD}/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" `
+      -v "${PWD}/monitoring/rules:/etc/prometheus/rules:ro" `
+      prom/prometheus:v3.16.0 check config /etc/prometheus/prometheus.yml 2>&1
+    $promCfg | Where-Object { $_ -match 'SUCCESS' } | ForEach-Object { Write-Host $_ }
+
+    Show 'promtool check rules monitoring/rules/alerts.yml'
+    $promRules = docker run --rm --entrypoint promtool `
+      -v "${PWD}/monitoring/rules:/etc/prometheus/rules:ro" `
+      prom/prometheus:v3.16.0 check rules /etc/prometheus/rules/alerts.yml 2>&1
+    $promRules | Where-Object { $_ -match 'SUCCESS' } | ForEach-Object { Write-Host $_ }
+
+    Show 'Invoke-RestMethod http://127.0.0.1:9090/api/v1/targets'
+    $targets = Invoke-RestMethod 'http://127.0.0.1:9090/api/v1/targets'
+    $target = $targets.data.activeTargets | Where-Object { $_.labels.job -eq 'kong' } | Select-Object -First 1
+    Write-Host ("kong target: health=" + $target.health + " lastError='" + $target.lastError + "'")
+
+    Show 'Invoke-RestMethod http://127.0.0.1:9090/api/v1/rules'
+    $rules = Invoke-RestMethod 'http://127.0.0.1:9090/api/v1/rules'
+    $ruleCount = 0
+    $rules.data.groups | ForEach-Object { $ruleCount += $_.rules.Count }
+    Write-Host ("rule groups: " + (($rules.data.groups | ForEach-Object { $_.name + '=' + $_.rules.Count }) -join ', '))
+
+    Show 'Invoke-RestMethod http://127.0.0.1:9090/api/v1/alertmanagers'
+    $ams = Invoke-RestMethod 'http://127.0.0.1:9090/api/v1/alertmanagers'
+    $amUrls = @($ams.data.activeAlertmanagers | ForEach-Object { $_.url })
+    Write-Host ("active alertmanagers: " + ($amUrls -join ', '))
+
+    $successCount = (@($promCfg) + @($promRules) | Where-Object { $_ -match 'SUCCESS' } | Measure-Object).Count
+    $ok = (($verify -join "`n") -match 'M1 RESULT: PASS') `
+      -and ($successCount -ge 4) `
+      -and ($target.health -eq 'up') `
+      -and ($ruleCount -eq 3) `
+      -and (($amUrls -join ',') -match 'alertmanager:9093')
+    Finish $ok
+  }
+
   default {
     Write-Host "unknown evidence id $Id" -ForegroundColor Red
     Finish $false

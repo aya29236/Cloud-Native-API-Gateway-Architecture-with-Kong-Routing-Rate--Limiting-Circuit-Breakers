@@ -219,6 +219,7 @@ Evidence (real screenshots of the PowerShell terminal window, captured by `scrip
 | 20 | `screenshots/20_layer2_rate_token_tls.png` | PNG | repo `screenshots/` | live G3 tiered limits, G4 token-bucket parity and G5 HTTPS/SAN checks |
 | 21 | `screenshots/21_layer2_telemetry.png` | PNG | repo `screenshots/` | `kong_*` metrics on :8100 plus a C2 0.1.1 `file-log` field check |
 | 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 14 Advisor tests green, verified overview and 429 answer with citations, exact 503 fallback, and `/stats` through Kong |
+| 23 | `screenshots/23_layer4_prometheus_m1.png` | PNG | repo `screenshots/` | M1 contract check PASS, promtool config/rules SUCCESS, Kong target up, 3 rules loaded, Alertmanager connected |
 
 Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG is a direct screenshot of a visible PowerShell window running the live commands; regenerate one with:
 
@@ -362,6 +363,9 @@ Start the monitoring stack and run the live contract check:
 ```powershell
 docker compose --profile core --profile monitoring up -d prometheus alertmanager
 python scripts/verify_metrics_contract.py
+
+# Formal evidence 23 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '23' -Output 'screenshots\23_layer4_prometheus_m1.png'
 ```
 
 Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`.

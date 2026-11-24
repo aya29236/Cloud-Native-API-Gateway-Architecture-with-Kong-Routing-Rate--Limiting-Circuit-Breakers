@@ -69,3 +69,7 @@
 ## DEC-017 — Layer 5 terminal evidence 22
 - Status: Applied after explicit A/B/C approval for the M5 evidence step
 - Decision: Evidence `screenshots/22_layer5_verified_analyzer.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 22` branch in `scripts/terminal-evidence-run.ps1`. The window shows the 14-test Advisor suite, a verified overview, a verified 429 answer with `[L…]` citations, the exact 503 `"No verified data"` fallback, and the live `/stats` endpoint through Kong. The capture returned `RESULT: PASS`.
+
+## DEC-018 — Layer 4 terminal evidence 23
+- Status: Applied after explicit A/B/C approval for the M1 evidence step
+- Decision: Evidence `screenshots/23_layer4_prometheus_m1.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 23` branch in `scripts/terminal-evidence-run.ps1`. The window shows `python scripts/verify_metrics_contract.py` returning `M1 RESULT: PASS`, `promtool check config` and `promtool check rules` SUCCESS lines, the Kong target `up`, 3 loaded rules in `fintech-kong-alerts`, and the active Alertmanager URL. The capture returned `RESULT: PASS`.
