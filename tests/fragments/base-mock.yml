@@ -2,9 +2,9 @@ _format_version: "3.0"
 _transform: true
 
 # Independent-wave lab base: the three real service/route names point at the
-# deterministic Gate 0 mock upstream. Fragment files are concatenated to this
-# base by scripts/fragment_lab.py, so each plugin is tested exactly as it will
-# be attached at Layer 2, but without touching the live kong.yml.
+# deterministic Gate 0 mock upstream. scripts/verify_fragments.py writes these
+# sections and the selected fragment sections explicitly into kong/kong.yml;
+# scripts/fragment_lab.py only parses/boots whatever kong.yml currently says.
 
 services:
   - name: mock-upstream

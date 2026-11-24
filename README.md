@@ -211,7 +211,7 @@ No numbered evidence is due for the independent wave; each module's own test is 
 
 ### Fragment lab runbook
 
-`scripts/fragment_lab.py` merges `tests/fragments/base-mock.yml` with the selected fragments using only the Python standard library (duplicate top-level keys such as `plugins` are merged as lists, not silently overwritten) and runs a throwaway Kong 3.9.1 on the `fintech-gateway` network against the deterministic mock upstream.
+`scripts/fragment_lab.py` no longer merges YAML: it only parses or boots whatever `kong/kong.yml` explicitly contains. `scripts/verify_fragments.py` writes the selected fragment sections explicitly into `kong/kong.yml`, runs real Kong 3.9.1, and restores the Layer 1 baseline. There is no PyYAML and no generated temporary merged config. For a live lab, use `verify_fragments.py <fragments...>` to write that explicit config, boot it with `fragment_lab.py up`, then restore `kong/kong.yml` before moving on.
 
 Prerequisites for the Windows host — use the supplied Git for Windows and standalone OpenSSL-Win64:
 
@@ -232,26 +232,40 @@ set "PATH=C:\Program Files\Git\usr\bin;%PATH%"
 `& "C:\path\to\exe"` is PowerShell-only. In `cmd.exe`, write `"C:\path\to\exe" --arg` with no `&`.
 
 ```powershell
-python scripts/fragment_lab.py parse kong/fragments/10-auth.yml kong/fragments/20-ratelimit.yml
-python scripts/fragment_lab.py up   kong/fragments/10-auth.yml kong/fragments/20-ratelimit.yml --name lab-rate --proxy 18200 --admin 18201
+# Parse every fragment through an explicit merge into kong/kong.yml, then restore it.
+python scripts/verify_fragments.py
+
+# Rate limiting (G3): write the explicit merge, boot it, then restore.
+python scripts/verify_fragments.py kong/fragments/10-auth.yml kong/fragments/20-ratelimit.yml
+python scripts/fragment_lab.py up --name lab-rate --proxy 18200 --admin 18201
 python scripts/fragment_lab.py down lab-rate
+git checkout -- kong/kong.yml
 
 # custom Lua plugin (G4)
-python scripts\fragment_lab.py up kong\fragments\10-auth.yml kong\fragments\25-tokenbucket.yml `
+python scripts\verify_fragments.py kong\fragments\10-auth.yml kong\fragments\25-tokenbucket.yml
+python scripts\fragment_lab.py up `
   --name lab-token --proxy 18400 --admin 18401 --plugins bundled,token-bucket `
   --plugin-mount kong\plugins\token-bucket
 python tests/fragments/verify_token_bucket.py --url http://127.0.0.1:18400
+python scripts\fragment_lab.py down lab-token
+git checkout -- kong\kong.yml
 
 # TLS (G5) - regenerate demo credentials/certificate with Git bash + OpenSSL-Win64 4.1.0
 & "C:\Program Files\Git\bin\bash.exe" scripts\gen_keys.sh
 & "C:\Program Files\Git\bin\bash.exe" scripts\gen_cert.sh
-python scripts/fragment_lab.py up kong/fragments/50-tls.yml --name lab-tls --proxy 18500 --tls 18943
+python scripts\verify_fragments.py kong\fragments\50-tls.yml
+python scripts\fragment_lab.py up --name lab-tls --proxy 18500 --tls 18943
 curl.exe --cacert certs\localhost.crt https://localhost:18943/api/accounts/health
 & "C:\Program Files\OpenSSL-Win64\bin\openssl.exe" s_client -connect localhost:18943 -servername localhost -CAfile certs\localhost.crt -brief
+python scripts\fragment_lab.py down lab-tls
+git checkout -- kong\kong.yml
 
 # telemetry (G7)
 $logs = "$env:TEMP\opencode\kong-logs-lab"
-python scripts/fragment_lab.py up kong/fragments/40-telemetry.yml --name lab-telemetry --proxy 18600 --log-mount $logs
+python scripts\verify_fragments.py kong\fragments\40-telemetry.yml
+python scripts\fragment_lab.py up --name lab-telemetry --proxy 18600 --log-mount $logs
+python scripts\fragment_lab.py down lab-telemetry
+git checkout -- kong\kong.yml
 ```
 
 Same G5 commands in `cmd.exe` (no `&`):

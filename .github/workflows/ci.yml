@@ -127,11 +127,11 @@ jobs:
       - name: Advisor pytest (V3)
         run: cd advisor && python -m pytest
 
-      - name: Plugin simulator + fragment merge tests
+      - name: Plugin simulator + offline guard tests
         run: python -m pytest tests/fragments -q
 
-      - name: Parse every independent-wave fragment with Kong 3.9.1
-        run: python scripts/fragment_lab.py parse kong/fragments/*.yml
+      - name: Parse every fragment via explicit merge into kong.yml (Kong 3.9.1)
+        run: python scripts/verify_fragments.py
 
   p3c-platform-and-images:
     name: P3c platform gates + image builds

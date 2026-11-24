@@ -6,10 +6,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
-from scripts.fragment_lab import build  # noqa: E402
 from scripts.token_bucket_sim import (  # noqa: E402
     fixed_window,
     leaky_bucket,
@@ -35,26 +34,31 @@ def test_four_algorithms_are_distinct_on_the_same_trace() -> None:
         "fixed": fixed_window(5, 0.8, DISTINCT_TRACE),
         "sliding": sliding_window(5, 0.8, DISTINCT_TRACE),
         "token": token_bucket(5, 1, DISTINCT_TRACE),
-        "leaky": leaky_bucket(5, 1, DISTINCT_TRACE),
+        "leaky": leaky_bucket(5, 0.8, DISTINCT_TRACE),
     }
     assert len({tuple(values) for values in patterns.values()}) == 4
 
 
-def test_fragment_merge_has_one_header_per_top_level_section() -> None:
-    target = build(
-        [
-            "kong/fragments/10-auth.yml",
-            "kong/fragments/20-ratelimit.yml",
-            "kong/fragments/25-tokenbucket.yml",
-            "kong/fragments/30-transform.yml",
-            "kong/fragments/40-telemetry.yml",
-            "kong/fragments/50-tls.yml",
-        ]
-    )
-    lines = target.read_text(encoding="utf-8").splitlines()
+def test_fragment_lab_does_not_merge_yaml() -> None:
+    source = (ROOT / "scripts" / "fragment_lab.py").read_text(encoding="utf-8")
+    assert "import yaml" not in source
+    assert "def build(" not in source
+    assert "def _sections(" not in source
+    assert "def parse() -> int:" in source
 
-    assert sum(line.startswith("plugins:") for line in lines) == 1
-    assert sum(line.startswith("consumers:") for line in lines) == 1
-    assert sum(line.startswith("certificates:") for line in lines) == 1
-    assert any("name: token-bucket" in line for line in lines)
-    assert any("name: key-auth" in line for line in lines)
+
+def test_explicit_merge_uses_no_yaml_library() -> None:
+    source = (ROOT / "scripts" / "verify_fragments.py").read_text(encoding="utf-8")
+    assert "import yaml" not in source
+    assert "def explicit_merge(" in source
+    assert "kong/kong.yml" in source
+
+
+def test_live_kong_config_has_no_duplicate_top_level_keys() -> None:
+    text = (ROOT / "kong" / "kong.yml").read_text(encoding="utf-8")
+    keys = [
+        line.split(":", 1)[0].strip()
+        for line in text.splitlines()
+        if line and not line[0].isspace() and not line.lstrip().startswith("#") and ":" in line
+    ]
+    assert len(keys) == len(set(keys)), keys

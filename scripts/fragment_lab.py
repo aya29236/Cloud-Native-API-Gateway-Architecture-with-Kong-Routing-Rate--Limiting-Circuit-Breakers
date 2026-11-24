@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""Independent-wave plugin fragment lab.
+"""Run Kong 3.9.1 against the current explicit contents of kong/kong.yml.
 
-Builds a DB-less Kong declarative config by concatenating tests/fragments/
-base-mock.yml with one or more kong/fragments/*.yml files, then either parses
-it with the real Kong 3.9.1 binary or boots a throwaway Kong container that
-proxies to the Gate 0 mock upstream. This keeps the live kong.yml untouched
-until Layer 2 (I3) merges the fragments.
+There is deliberately no YAML merge logic here. To test a fragment, put its
+sections into kong/kong.yml explicitly first, run this tool, then restore the
+Layer 1 baseline. `scripts/verify_fragments.py` performs that explicit
+write/parse/restore cycle for CI without any YAML parser library.
 
 Examples (PowerShell):
-  python scripts/fragment_lab.py parse kong/fragments/10-auth.yml
-  python scripts/fragment_lab.py up   kong/fragments/10-auth.yml --name lab-auth
+  python scripts/fragment_lab.py parse
+  python scripts/fragment_lab.py up   --name lab-auth
   python scripts/fragment_lab.py down lab-auth
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
 import time
@@ -25,76 +23,26 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE = ROOT / "tests" / "fragments" / "base-mock.yml"
-WORK = Path(os.environ.get("TEMP", "/tmp")) / "opencode" / "fragment-lab"
+CONFIG = ROOT / "kong" / "kong.yml"
+KONG_DIR = ROOT / "kong"
+PLUGIN_DIR = ROOT / "kong" / "plugins" / "token-bucket"
 NETWORK = "fintech-gateway"
-IMAGE = os.environ.get("KONG_IMAGE", "kong:3.9.1")
+IMAGE = "kong:3.9.1"
 
 
-SCALAR_KEYS = {"_format_version", "_transform"}
-
-
-def _sections(text: str) -> dict[str, list[str]]:
-    """Split a Kong declarative YAML file into its top-level sections.
-
-    We only need top-level key merging; keeping the original text avoids a
-    third-party YAML dependency and preserves Kong's certified field names.
-    """
-    sections: dict[str, list[str]] = {}
-    current: str | None = None
-    for line in text.splitlines():
-        if line and not line[0].isspace() and not line.lstrip().startswith("#"):
-            key = line.split(":", 1)[0].strip()
-            if key and ":" in line:
-                current = key
-                sections.setdefault(current, [])
-                sections[current].append(line)
-                continue
-        if current is not None:
-            sections[current].append(line)
-    return sections
-
-
-def build(fragments: list[str]) -> Path:
-    """Merge base + fragments by top-level YAML key.
-
-    Fragments legitimately share keys (e.g. `plugins`); plain concatenation
-    would leave duplicate YAML keys and Kong would silently keep only the
-    last one, dropping earlier plugins. This stdlib merger appends the bodies
-    of repeated list sections under a single header, so every plugin survives.
-    """
-    WORK.mkdir(parents=True, exist_ok=True)
-    merged: dict[str, list[str]] = _sections(BASE.read_text(encoding="utf-8"))
-    sources = [
-        (Path(raw) if Path(raw).is_absolute() else ROOT / raw) for raw in fragments
-    ]
-    for path in sources:
-        for key, lines in _sections(path.read_text(encoding="utf-8")).items():
-            if key in merged and key not in SCALAR_KEYS:
-                merged[key].append("")
-                merged[key].extend(lines[1:])
-            elif key not in merged:
-                merged[key] = lines
-
-    rendered: list[str] = []
-    for lines in merged.values():
-        rendered.extend(lines)
-        rendered.append("")
-    target = WORK / "kong.yml"
-    target.write_text("\n".join(rendered).rstrip() + "\n", encoding="utf-8")
-    return target
-
-
-def parse(fragments: list[str]) -> int:
-    target = build(fragments)
-    print(f"config: {target}")
+def parse() -> int:
+    """Parse the explicitly merged kong/kong.yml with the real Kong binary."""
+    if not CONFIG.is_file():
+        print(f"missing declarative config: {CONFIG}", file=sys.stderr)
+        return 1
+    print(f"config: {CONFIG}")
     result = subprocess.run(
         [
             "docker", "run", "--rm",
             "-e", "KONG_DATABASE=off",
             "-e", "KONG_PLUGINS=bundled,token-bucket",
-            "-v", f"{WORK}:/etc/kong:ro",
-            "-v", f"{ROOT / 'kong' / 'plugins' / 'token-bucket'}:/usr/local/share/lua/5.1/kong/plugins/token-bucket:ro",
+            "-v", f"{KONG_DIR}:/etc/kong:ro",
+            "-v", f"{PLUGIN_DIR}:/usr/local/share/lua/5.1/kong/plugins/token-bucket:ro",
             IMAGE, "kong", "config", "parse", "/etc/kong/kong.yml",
         ],
         cwd=ROOT,
@@ -107,12 +55,15 @@ def parse(fragments: list[str]) -> int:
 
 
 def up(args: argparse.Namespace) -> int:
-    target = build(args.fragment)
+    """Boot a throwaway Kong using the current kong/kong.yml."""
+    if not CONFIG.is_file():
+        print(f"missing declarative config: {CONFIG}", file=sys.stderr)
+        return 1
     cmd = [
         "docker", "run", "-d", "--rm",
         "--name", args.name,
         "--network", NETWORK,
-        "-v", f"{WORK}:/etc/kong:ro",
+        "-v", f"{KONG_DIR}:/etc/kong:ro",
         "-e", "KONG_DATABASE=off",
         "-e", "KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml",
         "-e", "KONG_PROXY_LISTEN=0.0.0.0:8000, 0.0.0.0:8443 ssl",
@@ -151,7 +102,10 @@ def up(args: argparse.Namespace) -> int:
         try:
             with urllib.request.urlopen(url, timeout=1) as response:
                 if response.status == 200:
-                    print(f"ready: proxy=127.0.0.1:{args.proxy} admin=127.0.0.1:{args.admin} tls=127.0.0.1:{args.tls}")
+                    print(
+                        f"ready: proxy=127.0.0.1:{args.proxy} "
+                        f"admin=127.0.0.1:{args.admin} tls=127.0.0.1:{args.tls}"
+                    )
                     return 0
         except (urllib.error.URLError, TimeoutError, OSError):
             time.sleep(1)
@@ -168,11 +122,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 
-    p_parse = sub.add_parser("parse", help="run kong config parse on base + fragments")
-    p_parse.add_argument("fragment", nargs="+")
+    sub.add_parser("parse", help="parse the current kong/kong.yml with Kong 3.9.1")
 
-    p_up = sub.add_parser("up", help="boot a throwaway Kong with base + fragments")
-    p_up.add_argument("fragment", nargs="+")
+    p_up = sub.add_parser("up", help="boot Kong from the current kong/kong.yml")
     p_up.add_argument("--name", default="fintech-fragment-lab")
     p_up.add_argument("--proxy", type=int, default=18000)
     p_up.add_argument("--admin", type=int, default=18001)
@@ -196,7 +148,7 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.action == "parse":
-        return parse(args.fragment)
+        return parse()
     if args.action == "up":
         return up(args)
     if args.action == "down":

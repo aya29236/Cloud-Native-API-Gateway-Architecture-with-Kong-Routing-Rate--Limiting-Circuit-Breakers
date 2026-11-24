@@ -1,20 +1,27 @@
 Independent wave G2-G7 - verification transcript (Student A / Student C, checked by Student B)
 ============================================================================================
-Re-run after the approved toolchain fixes on 2026-11-24.
+Re-run after the approved toolchain fixes and explicit-merge correction on 2026-11-24.
 Toolchain: Kong 3.9.1, Python 3.13, PyJWT 2.15.1, GNU bash 5.3.15
 (C:\Program Files\Git\bin\bash.exe), OpenSSL 4.1.0
 (C:\Program Files\OpenSSL-Win64\bin\openssl.exe). PyJWT is pinned in
 requirements-dev.txt; scripts prefer the standalone OpenSSL-Win64 binary.
 
-All fragments were parsed with the real Kong 3.9.1 binary via
-  python scripts/fragment_lab.py parse <fragments...>
-and tested against the Gate 0 mock upstream through throwaway Kong containers
-created by scripts/fragment_lab.py. The live kong.yml was NOT modified.
+scripts/fragment_lab.py no longer merges YAML and no PyYAML/temporary merged
+config is used. scripts/verify_fragments.py writes each scenario's sections
+explicitly into kong/kong.yml, parses it with the real Kong 3.9.1 binary, and
+restores the Layer 1 baseline. CI verifies 7 dependency-aware scenarios:
+10-auth alone; auth+rate-limit; auth+token-bucket; auth+transform;
+telemetry alone; TLS alone; all fragments combined. Consumer-scoped plugins
+cannot parse without 10-auth.yml, so those scenarios include it explicitly.
+
+The live G2-G7 checks used the same explicit_merge() helper before each
+throwaway Kong container booted from kong/kong.yml. The container was removed
+after each gate and the Layer 1 kong.yml was restored at the end.
 Summary: 25/25 checks passed.
 
 G2 10-auth.yml (Student A)
 -------------------------
-parse successful
+explicit merge into kong/kong.yml; parse successful (container dd14cd98...)
 accounts no key:       401
 accounts free key:     200
 accounts bad key:      401
@@ -28,18 +35,20 @@ payments wrong iss:    401  (--secret wrong-secret)
 
 G3 20-ratelimit.yml (Student C)
 -------------------------------
-parse successful (combined with 10-auth.yml)
+explicit merge of 10-auth.yml + 20-ratelimit.yml; parse successful
+(container 056077d8...)
 free burst 12 requests, limit 10/min:
   200,200,200,200,200,200,200,200,200,200,429,429
 429 response headers include X-RateLimit-Limit-Minute: 10,
-  X-RateLimit-Remaining-Minute: 0, plus Retry-After.
+  X-RateLimit-Remaining-Minute: 0, Retry-After: 12 in this run.
 premium burst 12 requests: 200 x 12.
 Kong 3.9 docs confirm: fixed window, `limit_by: consumer`, `policy: local`
   (per-node in-memory counters), body {"message":"API rate limit exceeded"}.
 
 G4 25-tokenbucket.yml + kong/plugins/token-bucket (Student A)
 --------------------------------------------------------------
-parse successful (KONG_PLUGINS=bundled,token-bucket)
+explicit merge of 10-auth.yml + 25-tokenbucket.yml; parse successful
+(KONG_PLUGINS=bundled,token-bucket; container a924054b...)
 simulator: 111110000000
 live Kong: 111110000000
 burst parity: PASS
@@ -52,7 +61,8 @@ G5 50-tls.yml + scripts/gen_cert.sh (Student A)
 ------------------------------------------------
 Certificate regenerated with Git-for-Windows bash 5.3.15 + OpenSSL-Win64 4.1.0;
 gen_cert.sh now handles MSYS path conversion and native Windows output paths.
-parse successful
+explicit merge of 10-auth.yml + 50-tls.yml; parse successful
+(container b089097e...)
 HTTPS localhost:8443 -> 200 with --cacert certs/localhost.crt
 openssl s_client -connect localhost:18443 -servername localhost -brief:
   Peer certificate: CN=localhost, O=FinTech Gateway Demo
@@ -63,8 +73,9 @@ Upstream traffic remains plain HTTP.
 
 G6 30-transform.yml (Student C)
 -------------------------------
-parse successful
-Kong-Request-ID: 0b352e88-1b72-4738-8f4f-7ca50eb3a9ae#1 (correlation-id)
+explicit merge of 10-auth.yml + 30-transform.yml; parse successful
+(container 51a5a0a9...)
+Kong-Request-ID: 48c9c3f5-08e1-4584-9c93-8d24410d6074#1 (correlation-id)
 mock /echo headers: x_gateway=fintech-kong, x_debug=null (request-transformer)
 CORS preflight OPTIONS: 200, Access-Control-Allow-Origin: http://localhost:3000,
   Allow-Methods: GET,POST,OPTIONS, Allow-Headers: apikey,Authorization,Content-Type,
@@ -77,7 +88,8 @@ request-size-limiting corrected to 1024 bytes (`size_unit: bytes`); a 2000-byte
 
 G7 40-telemetry.yml (Student A)
 -------------------------------
-parse successful
+explicit merge of 10-auth.yml + 40-telemetry.yml; parse successful
+(container 1aa83655...)
 Prometheus :8100/metrics exposes 49 kong_* samples, including
   kong_http_requests_total, kong_kong_latency_ms, kong_bandwidth_bytes.
 file-log /var/log/kong/access.json line fields:
