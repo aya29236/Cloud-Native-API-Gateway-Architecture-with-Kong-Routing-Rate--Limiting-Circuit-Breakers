@@ -1,8 +1,10 @@
 Independent wave G2-G7 - verification transcript (Student A / Student C, checked by Student B)
 ============================================================================================
 Re-run after the approved toolchain fixes on 2026-11-24.
-Toolchain: Kong 3.9.1, Python 3.13, PyJWT 2.15.1, GNU bash 5.3.15 (Git for Windows),
-OpenSSL 3.5.9 (Git for Windows). PyJWT is pinned in requirements-dev.txt.
+Toolchain: Kong 3.9.1, Python 3.13, PyJWT 2.15.1, GNU bash 5.3.15
+(C:\Program Files\Git\bin\bash.exe), OpenSSL 4.1.0
+(C:\Program Files\OpenSSL-Win64\bin\openssl.exe). PyJWT is pinned in
+requirements-dev.txt; scripts prefer the standalone OpenSSL-Win64 binary.
 
 All fragments were parsed with the real Kong 3.9.1 binary via
   python scripts/fragment_lab.py parse <fragments...>
@@ -48,7 +50,7 @@ Live plugin: free capacity 5 @ 1 token/s, premium capacity 50 @ 10 tokens/s;
 
 G5 50-tls.yml + scripts/gen_cert.sh (Student A)
 ------------------------------------------------
-Certificate regenerated with real Git-for-Windows bash 5.3.15 + OpenSSL 3.5.9;
+Certificate regenerated with Git-for-Windows bash 5.3.15 + OpenSSL-Win64 4.1.0;
 gen_cert.sh now handles MSYS path conversion and native Windows output paths.
 parse successful
 HTTPS localhost:8443 -> 200 with --cacert certs/localhost.crt

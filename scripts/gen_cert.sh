@@ -8,16 +8,32 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/certs"
 FRAGMENT="$ROOT/kong/fragments/50-tls.yml"
 mkdir -p "$OUT"
-if ! command -v openssl >/dev/null 2>&1; then
-  echo "openssl not found; add real OpenSSL (Git for Windows usr/bin) to PATH" >&2
+
+# Prefer the standalone OpenSSL-Win64 installation supplied for this project;
+# OPENSSL_BIN can override it, and PATH is the last resort.
+OPENSSL_BIN="${OPENSSL_BIN:-}"
+if [[ "$OPENSSL_BIN" == [A-Za-z]:* ]]; then
+  OPENSSL_BIN="$(cygpath -u "$OPENSSL_BIN" 2>/dev/null || printf '%s' "$OPENSSL_BIN")"
+fi
+if [ -z "$OPENSSL_BIN" ]; then
+  for candidate in "/c/Program Files/OpenSSL-Win64/bin/openssl.exe" "$(command -v openssl 2>/dev/null || true)"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      OPENSSL_BIN="$candidate"
+      break
+    fi
+  done
+fi
+if [ -z "$OPENSSL_BIN" ] || [ ! -x "$OPENSSL_BIN" ]; then
+  echo "openssl not found; set OPENSSL_BIN to C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe" >&2
   exit 1
 fi
+echo "using $("$OPENSSL_BIN" version 2>&1 | head -n 1)"
 
 # Git Bash path-converts /CN=... unless MSYS_NO_PATHCONV is set, while the
 # Windows OpenSSL binary needs native paths for its output files.
 OUT_WIN="$(cygpath -w "$OUT" 2>/dev/null || echo "$OUT")"
 FRAGMENT_WIN="$(cygpath -w "$FRAGMENT" 2>/dev/null || echo "$FRAGMENT")"
-MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 365 \
+MSYS_NO_PATHCONV=1 "$OPENSSL_BIN" req -x509 -newkey rsa:2048 -nodes -sha256 -days 365 \
   -subj "/CN=localhost/O=FinTech Gateway Demo" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
   -keyout "$OUT_WIN/localhost.key" \
