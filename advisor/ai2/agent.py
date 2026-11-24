@@ -1,0 +1,280 @@
+"""Bounded raw LLM tool-calling loop for AI1 deterministic tools."""
+
+import json
+import re
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, ValidationError
+
+from advisor.ai1.models import ParsedLogRecord
+from .llm import LLMClient
+from .prompts import SYSTEM_PROMPT, tool_result_message
+from .schemas import TOOL_REGISTRY, build_tool_definitions
+
+
+MAX_STEPS = 6
+CITATION_RE = re.compile(r"\[L([1-9][0-9]*)\]")
+
+
+class AnalyzeResponse(BaseModel):
+    """C1 analyzer response shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    stats: dict[str, Any]
+    citations: list[str]
+    tool_trace: list[dict[str, Any]]
+    verified: bool = False
+
+
+def _tool_call_parts(call: Mapping[str, Any]) -> tuple[str, Any]:
+    function = call.get("function")
+    if not isinstance(function, Mapping):
+        return "", {}
+    name = function.get("name")
+    arguments = function.get("arguments", {})
+    return str(name or ""), arguments
+
+
+def _arguments_dict(arguments: Any) -> dict[str, Any]:
+    if isinstance(arguments, Mapping):
+        return dict(arguments)
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _json_safe(value: Any) -> Any:
+    """Convert Pydantic and list/dict values to JSON-safe trace data."""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(nested) for key, nested in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(nested) for nested in value]
+    return value
+
+
+def analyze(
+    question: str,
+    records: Sequence[ParsedLogRecord],
+    client: LLMClient,
+    max_steps: int = MAX_STEPS,
+) -> AnalyzeResponse:
+    """Run a bounded raw tool-calling loop over read-only AI1 records."""
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
+        return AnalyzeResponse(
+            summary="No verified data",
+            stats={},
+            citations=[],
+            tool_trace=[{"step": 0, "tool": "", "arguments": {}, "result_summary": "", "error": "invalid max_steps"}],
+        )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": question},
+    ]
+    tools = build_tool_definitions()
+    tool_trace: list[dict[str, Any]] = []
+    stats: dict[str, Any] = {}
+    tool_cache: dict[tuple[str, str], tuple[Any, str, str]] = {}
+    answer = ""
+
+    for loop_step in range(1, max_steps + 1):
+        try:
+            assistant = client.chat(messages, tools)
+        except Exception as exc:
+            return AnalyzeResponse(
+                summary="No verified data",
+                stats=stats,
+                citations=[],
+                tool_trace=tool_trace
+                + [
+                    {
+                        "step": loop_step,
+                        "tool": "",
+                        "arguments": {},
+                        "result_summary": "",
+                        "error": f"LLM error: {exc}",
+                    }
+                ],
+            )
+
+        tool_calls = assistant.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            answer = assistant.get("content")
+            answer = answer.strip() if isinstance(answer, str) else ""
+            break
+
+        for call in tool_calls:
+            step = len(tool_trace) + 1
+            if step > max_steps:
+                return AnalyzeResponse(
+                    summary="No verified data",
+                    stats=stats,
+                    citations=[],
+                    tool_trace=tool_trace
+                    + [
+                        {
+                            "step": step,
+                            "tool": "",
+                            "arguments": {},
+                            "result_summary": "",
+                            "error": "step cap reached",
+                        }
+                    ],
+                )
+
+            tool_name, raw_arguments = _tool_call_parts(call)
+            arguments = _arguments_dict(raw_arguments)
+            error = ""
+            result: Any = None
+            result_summary = ""
+            duplicate = False
+
+            if tool_name not in TOOL_REGISTRY:
+                error = f"unknown tool: {tool_name}"
+                cache_key = (
+                    tool_name,
+                    json.dumps(arguments, sort_keys=True, separators=(",", ":"), default=str),
+                )
+                if cache_key in tool_cache:
+                    result, result_summary, error = tool_cache[cache_key]
+                    duplicate = True
+                else:
+                    tool_cache[cache_key] = (result, result_summary, error)
+                tool_trace.append(
+                    {
+                        "step": step,
+                        "tool": tool_name,
+                        "arguments": arguments,
+                        "result_summary": "",
+                        "error": error,
+                        **({"note": "duplicate call: answer now"} if duplicate else {}),
+                    }
+                )
+                messages.append(
+                    tool_result_message(
+                        tool_name,
+                        (
+                            {
+                                "result": result,
+                                "error": error,
+                                "note": "duplicate call: answer now",
+                            }
+                            if duplicate
+                            else {"error": error}
+                        ),
+                    )
+                )
+                continue
+
+            argument_model, tool = TOOL_REGISTRY[tool_name]
+            try:
+                validated = argument_model.model_validate(arguments)
+                kwargs = validated.model_dump()
+                cache_key = (
+                    tool_name,
+                    json.dumps(kwargs, sort_keys=True, separators=(",", ":"), default=str),
+                )
+                if cache_key in tool_cache:
+                    result, result_summary, error = tool_cache[cache_key]
+                    duplicate = True
+                else:
+                    try:
+                        result = tool(records, **kwargs)
+                    except (ValueError, TypeError) as exc:
+                        error = f"invalid arguments: {exc}"
+                    else:
+                        result = _json_safe(result)
+                        stats[tool_name] = result
+                        result_summary = json.dumps(
+                            result,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
+                    tool_cache[cache_key] = (result, result_summary, error)
+            except ValidationError as exc:
+                error = f"invalid arguments: {exc.errors(include_url=False)}"
+                raw_key = (
+                    tool_name,
+                    json.dumps(arguments, sort_keys=True, separators=(",", ":"), default=str),
+                )
+                if raw_key in tool_cache:
+                    result, result_summary, error = tool_cache[raw_key]
+                    duplicate = True
+                else:
+                    tool_cache[raw_key] = (result, result_summary, error)
+
+            tool_trace.append(
+                {
+                    "step": step,
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result_summary": result_summary,
+                    "error": error,
+                    **({"note": "duplicate call: answer now"} if duplicate else {}),
+                }
+            )
+            messages.append(
+                tool_result_message(
+                    tool_name,
+                    (
+                        {
+                            "result": result,
+                            "error": error,
+                            "note": "duplicate call: answer now",
+                        }
+                        if duplicate
+                        else result if not error else {"error": error}
+                    ),
+                )
+            )
+    else:
+        answer = "No verified data"
+
+    if not answer:
+        answer = "No verified data"
+
+    citations = sorted(set(f"[L{number}]" for number in CITATION_RE.findall(answer)))
+    return AnalyzeResponse(
+        summary=answer,
+        stats=stats,
+        citations=citations,
+        tool_trace=tool_trace,
+        verified=False,  # TODO(AI3): replace with verifier result.
+    )
+
+
+def save_trace(
+    response: AnalyzeResponse,
+    directory: str = "advisor/traces",
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Save one JSON trace file with timestamp and question slug."""
+    target = Path(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc)
+    stamp = timestamp.strftime("%Y%m%dT%H%M%S%fZ")
+    summary = response.summary.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", summary).strip("-")[:60] or "trace"
+    path = target / f"{stamp}-{slug}.json"
+    payload = {
+        "timestamp": timestamp.isoformat(),
+        "response": response.model_dump(),
+    }
+    if extra:
+        payload.update(extra)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
