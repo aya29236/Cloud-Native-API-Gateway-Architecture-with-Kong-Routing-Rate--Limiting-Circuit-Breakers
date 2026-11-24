@@ -65,10 +65,25 @@ services:
       start_period: 5s
     profiles: ["core"]
 
+  # Layer 2/I3: the named log volume is created root-owned; make it writable
+  # by Kong's uid before Kong starts so file-log can write the C2 access log.
+  kong-logs-init:
+    image: ${KONG_IMAGE:-kong:3.9.1}
+    container_name: kong-logs-init
+    user: root
+    command: ["sh", "-c", "chown -R 1001:1001 /var/log/kong && chmod 775 /var/log/kong"]
+    volumes:
+      - kong-logs:/var/log/kong
+    networks:
+      - gateway
+    profiles: ["core"]
+
   kong:
     image: ${KONG_IMAGE:-kong:3.9.1}
     container_name: kong
     depends_on:
+      kong-logs-init:
+        condition: service_completed_successfully
       mock-upstream:
         condition: service_healthy
       accounts-1:
@@ -86,12 +101,16 @@ services:
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_STATUS_LISTEN: "0.0.0.0:8100"
       KONG_LOG_LEVEL: "notice"
+      # Layer 2/I3: custom Lua token bucket and its shared dictionary.
+      KONG_PLUGINS: "bundled,token-bucket"
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: "token_bucket 1m"
     volumes:
       - ./kong/kong.yml:/etc/kong/kong.yml:ro
+      - ./kong/plugins/token-bucket:/usr/local/share/lua/5.1/kong/plugins/token-bucket:ro
       - kong-logs:/var/log/kong
     ports:
       - "8000:8000"
@@ -252,7 +271,7 @@ services:
       # to a channel. TELEGRAM_API_BASE points at a local demo sink by
       # default; switch it to https://api.telegram.org for real delivery.
       ADVISOR_URL: http://kong:8000/api/advisor/analyze
-      ADVISOR_APIKEY: ${DEMO_APIKEY:-fintech-demo-key}
+      ADVISOR_APIKEY: ${DEMO_APIKEY:-premium-demo-key}
       TELEGRAM_API_BASE: http://notify-sink:8080
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-demo-token}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-fintech-alerts}

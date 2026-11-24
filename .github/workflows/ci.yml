@@ -55,11 +55,7 @@ jobs:
           PY
 
       - name: Parse live declarative Kong config with Kong 3.9.1
-        run: |
-          docker run --rm \
-            -e KONG_DATABASE=off \
-            -v "$GITHUB_WORKSPACE/kong:/etc/kong:ro" \
-            "$KONG_IMAGE" kong config parse /etc/kong/kong.yml
+        run: python scripts/fragment_lab.py parse
 
       - name: Validate Compose profiles
         run: docker compose --profile core --profile monitoring config --quiet

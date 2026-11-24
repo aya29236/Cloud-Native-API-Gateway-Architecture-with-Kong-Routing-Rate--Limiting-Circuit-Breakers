@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Parse each fragment by explicitly merging it into kong/kong.yml.
 
-No YAML parser and no generated temp config are used. This script writes the
-combined sections into the real declarative config, runs the real Kong 3.9.1
-parser through `fragment_lab.py parse`, then restores the Layer 1 baseline.
+No YAML parser and no generated temporary config are used. This script writes
+the combined sections into the real declarative config, runs the real Kong
+3.9.1 parser through `fragment_lab.py parse`, then restores the previous file.
+For an interactive lab, the selected write saves a local backup that
+`--restore` puts back; do not use `git checkout`, because the live Layer 2
+config is committed work, not a baseline to discard.
 
 Usage:
   python scripts/verify_fragments.py                         # parse every scenario
   python scripts/verify_fragments.py kong/fragments/10-auth.yml  # write one explicit merge
+  python scripts/verify_fragments.py --restore               # undo the explicit write
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BASE = ROOT / "tests" / "fragments" / "base-mock.yml"
 CONFIG = ROOT / "kong" / "kong.yml"
+BACKUP = ROOT / "kong" / "kong.yml.backup"
 FRAGMENT_DIR = ROOT / "kong" / "fragments"
 SCALAR_KEYS = {"_format_version", "_transform"}
 
@@ -71,11 +76,25 @@ def parse_current_config(label: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--restore",
+        action="store_true",
+        help="restore kong/kong.yml from the local backup made by an explicit write",
+    )
+    parser.add_argument(
         "fragments",
         nargs="*",
         help="write these fragments explicitly into kong/kong.yml instead of parsing all scenarios",
     )
     args = parser.parse_args()
+
+    if args.restore:
+        if not BACKUP.is_file():
+            print(f"no backup to restore: {BACKUP}", file=sys.stderr)
+            return 1
+        CONFIG.write_bytes(BACKUP.read_bytes())
+        BACKUP.unlink()
+        print(f"restored {CONFIG}")
+        return 0
 
     if args.fragments:
         selected: list[Path] = []
@@ -87,9 +106,10 @@ def main() -> int:
                 print(f"missing fragment: {path}", file=sys.stderr)
                 return 1
             selected.append(path)
+        BACKUP.write_bytes(CONFIG.read_bytes())
         CONFIG.write_text(explicit_merge(selected), encoding="utf-8")
         print(f"wrote explicit merge into {CONFIG}: {', '.join(args.fragments)}")
-        print("restore the Layer 1 baseline with: git checkout -- kong/kong.yml")
+        print("restore the live config with: python scripts/verify_fragments.py --restore")
         return 0
 
     original = CONFIG.read_bytes()

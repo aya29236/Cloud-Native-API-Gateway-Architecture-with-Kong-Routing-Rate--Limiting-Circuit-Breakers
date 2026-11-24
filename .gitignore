@@ -14,3 +14,4 @@ Thumbs.db
 reports/
 db.sqlite3
 scripts/demo_secrets/
+kong/kong.yml.backup

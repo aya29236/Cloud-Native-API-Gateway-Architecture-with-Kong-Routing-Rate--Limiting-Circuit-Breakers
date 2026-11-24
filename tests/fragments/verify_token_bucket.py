@@ -3,6 +3,11 @@
 
 Start the lab first (see README "G4 runbook"), then:
   python tests/fragments/verify_token_bucket.py --url http://127.0.0.1:18400
+
+Against the live Layer 2 gateway, use --count 5: that exercises only the
+guaranteed initial capacity. The consumer-scoped G3 rate limiter is global
+there, so the default 12-request burst would hit its 10/min ceiling before the
+token-bucket refill check.
 """
 
 from __future__ import annotations

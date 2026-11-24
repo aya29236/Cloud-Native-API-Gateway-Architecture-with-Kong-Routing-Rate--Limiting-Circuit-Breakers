@@ -62,3 +62,23 @@ def test_live_kong_config_has_no_duplicate_top_level_keys() -> None:
         if line and not line[0].isspace() and not line.lstrip().startswith("#") and ":" in line
     ]
     assert len(keys) == len(set(keys)), keys
+
+
+def test_live_kong_config_contains_layer2_plugins() -> None:
+    text = (ROOT / "kong" / "kong.yml").read_text(encoding="utf-8")
+    required = [
+        "name: key-auth",
+        "name: jwt",
+        "name: rate-limiting",
+        "name: token-bucket",
+        "name: correlation-id",
+        "name: request-transformer",
+        "name: cors",
+        "name: request-size-limiting",
+        "name: prometheus",
+        "name: file-log",
+        "certificates:",
+        "snis:",
+    ]
+    missing = [item for item in required if item not in text]
+    assert not missing, missing
