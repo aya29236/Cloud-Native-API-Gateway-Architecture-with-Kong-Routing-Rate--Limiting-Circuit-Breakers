@@ -37,3 +37,7 @@
 ## DEC-009 — Real CI pipeline before Layer 2
 - Status: Applied on the requested `ci/prototype-pipeline` branch
 - Decision: Replace the Gate 0 CI skeleton with three real jobs (P3a repository checks, P3b pytest/Kong/plugin mocks, P3c amtool/promtool/verifier/image builds) plus one aggregate green gate. The fragment merger is rewritten with the Python standard library so CI does not depend on PyYAML, which the project owner explicitly rejected. The pipeline runs on every push, pull request and manual dispatch. Evidence 18 was captured from real Actions runs #9 (red: broken `kong.yml`) and #10 (green: restored `kong.yml`); branch protection is still to be configured on GitHub.
+
+## DEC-010 — Verified lab toolchain and G6 byte limit
+- Status: Applied after the A/B/C approval following evidence 18
+- Decision: `scripts/make_jwt.py` uses real PyJWT 2.15.1 pinned in `requirements-dev.txt` instead of hand-rolled HS256. `scripts/gen_keys.sh` and `scripts/gen_cert.sh` require real GNU bash and OpenSSL from Git for Windows, fail loudly when absent, and handle MSYS path conversion. `kong/fragments/30-transform.yml` sets `allowed_payload_size: 1024` with `size_unit: bytes` so the documented 1 KB `request-size-limiting` behavior is real. The G2–G7 live redo passed 25/25 checks against the Gate 0 mock upstream; the transcript is in `tests/fragments/independent-wave-results.txt`.

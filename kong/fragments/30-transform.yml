@@ -47,4 +47,5 @@ plugins:
   - name: request-size-limiting
     service: accounts
     config:
-      allowed_payload_size: 1
+      allowed_payload_size: 1024
+      size_unit: bytes

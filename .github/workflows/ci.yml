@@ -115,7 +115,8 @@ jobs:
           python -m pip install --disable-pip-version-check \
             -r services/accounts/requirements.txt \
             -r services/payments/requirements.txt \
-            -r advisor/requirements.txt
+            -r advisor/requirements.txt \
+            -r requirements-dev.txt
 
       - name: Accounts pytest (V1)
         run: cd services/accounts && python -m pytest

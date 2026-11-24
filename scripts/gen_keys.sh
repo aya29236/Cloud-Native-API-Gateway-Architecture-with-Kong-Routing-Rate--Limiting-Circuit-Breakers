@@ -12,11 +12,11 @@ printf '%s\n' 'premium-jwt-secret' > "$OUT/premium_jwt_secret.txt"
 printf '%s\n' 'free-demo-key' > "$OUT/free_api_key.txt"
 printf '%s\n' 'premium-demo-key' > "$OUT/premium_api_key.txt"
 
-if command -v openssl >/dev/null 2>&1; then
-  openssl genrsa -out "$OUT/demo_rsa_private.pem" 2048 2>/dev/null
-  openssl rsa -in "$OUT/demo_rsa_private.pem" -pubout -out "$OUT/demo_rsa_public.pem" 2>/dev/null
-else
-  echo "openssl not found; skipped RSA keypair (HS256 demo secrets still written)"
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl not found; add real OpenSSL (Git for Windows usr/bin) to PATH" >&2
+  exit 1
 fi
+openssl genrsa -out "$OUT/demo_rsa_private.pem" 2048 2>/dev/null
+openssl rsa -in "$OUT/demo_rsa_private.pem" -pubout -out "$OUT/demo_rsa_public.pem" 2>/dev/null
 
 echo "demo secrets written to $OUT"

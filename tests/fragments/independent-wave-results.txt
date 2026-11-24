@@ -1,9 +1,14 @@
 Independent wave G2-G7 - verification transcript (Student A / Student C, checked by Student B)
 ============================================================================================
+Re-run after the approved toolchain fixes on 2026-11-24.
+Toolchain: Kong 3.9.1, Python 3.13, PyJWT 2.15.1, GNU bash 5.3.15 (Git for Windows),
+OpenSSL 3.5.9 (Git for Windows). PyJWT is pinned in requirements-dev.txt.
+
 All fragments were parsed with the real Kong 3.9.1 binary via
   python scripts/fragment_lab.py parse <fragments...>
 and tested against the Gate 0 mock upstream through throwaway Kong containers
 created by scripts/fragment_lab.py. The live kong.yml was NOT modified.
+Summary: 25/25 checks passed.
 
 G2 10-auth.yml (Student A)
 -------------------------
@@ -14,7 +19,7 @@ accounts bad key:      401
 advisor no key:        401
 advisor premium key:   200
 payments no jwt:       401
-payments valid jwt:    200  (python scripts/make_jwt.py --iss fintech-free)
+payments valid jwt:    200  (PyJWT: python scripts/make_jwt.py --iss fintech-free)
 payments premium jwt:  200
 payments bad jwt:      401  (--bad-signature)
 payments wrong iss:    401  (--secret wrong-secret)
@@ -24,10 +29,9 @@ G3 20-ratelimit.yml (Student C)
 parse successful (combined with 10-auth.yml)
 free burst 12 requests, limit 10/min:
   200,200,200,200,200,200,200,200,200,200,429,429
-premium burst 12 requests, limit 100/min:
-  200 x 12
 429 response headers include X-RateLimit-Limit-Minute: 10,
   X-RateLimit-Remaining-Minute: 0, plus Retry-After.
+premium burst 12 requests: 200 x 12.
 Kong 3.9 docs confirm: fixed window, `limit_by: consumer`, `policy: local`
   (per-node in-memory counters), body {"message":"API rate limit exceeded"}.
 
@@ -44,31 +48,37 @@ Live plugin: free capacity 5 @ 1 token/s, premium capacity 50 @ 10 tokens/s;
 
 G5 50-tls.yml + scripts/gen_cert.sh (Student A)
 ------------------------------------------------
+Certificate regenerated with real Git-for-Windows bash 5.3.15 + OpenSSL 3.5.9;
+gen_cert.sh now handles MSYS path conversion and native Windows output paths.
 parse successful
 HTTPS localhost:8443 -> 200 with --cacert certs/localhost.crt
-openssl s_client -servername localhost:
-  subject=CN=localhost, O=FinTech Gateway Demo
-  issuer=CN=localhost, O=FinTech Gateway Demo
-  X509v3 Subject Alternative Name: DNS:localhost, IP Address:127.0.0.1
+openssl s_client -connect localhost:18443 -servername localhost -brief:
+  Peer certificate: CN=localhost, O=FinTech Gateway Demo
+  Verification: OK
+  Protocol version: TLSv1.3
+  Hash used: SHA256
 Upstream traffic remains plain HTTP.
 
 G6 30-transform.yml (Student C)
 -------------------------------
 parse successful
-Kong-Request-ID: af1d8a03-658d-4c27-91be-a5402fca8de0#1 (correlation-id)
+Kong-Request-ID: 0b352e88-1b72-4738-8f4f-7ca50eb3a9ae#1 (correlation-id)
 mock /echo headers: x_gateway=fintech-kong, x_debug=null (request-transformer)
 CORS preflight OPTIONS: 200, Access-Control-Allow-Origin: http://localhost:3000,
   Allow-Methods: GET,POST,OPTIONS, Allow-Headers: apikey,Authorization,Content-Type,
-  Expose-Headers: X-RateLimit-Limit-Minute,X-RateLimit-Remaining-Minute,
-  Retry-After,Kong-Request-ID
-Request over 1 MB: 413 (request-size-limiting)
+  Max-Age: 600.
+CORS actual GET with Origin: Access-Control-Expose-Headers:
+  X-RateLimit-Limit-Minute,X-RateLimit-Remaining-Minute,Retry-After,Kong-Request-ID.
+request-size-limiting corrected to 1024 bytes (`size_unit: bytes`); a 2000-byte
+  POST now returns 413. The previous `allowed_payload_size: 1` meant 1 MB under
+  Kong's default unit, which contradicted the fragment's own 1 KB requirement.
 
 G7 40-telemetry.yml (Student A)
 -------------------------------
 parse successful
-Prometheus :8100/metrics exposes 107 kong_* samples, including
+Prometheus :8100/metrics exposes 49 kong_* samples, including
   kong_http_requests_total, kong_kong_latency_ms, kong_bandwidth_bytes.
 file-log /var/log/kong/access.json line fields:
-  client_ip, request{method,uri}, response{status}, latencies, started_at,
-  route{name}, service{name} -> all C2 0.1.1 required fields present;
-  no contract version bump needed.
+  client_ip, request, response, latencies, started_at, route, service, source,
+  tries, upstream_status, upstream_uri, workspace, workspace_name.
+All C2 0.1.1 required fields present; no contract version bump needed.

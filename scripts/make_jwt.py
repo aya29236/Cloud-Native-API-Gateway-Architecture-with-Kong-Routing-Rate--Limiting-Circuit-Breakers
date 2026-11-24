@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """G2: mint a demo HS256 JWT for the Payments jwt plugin.
 
-Uses only the Python standard library (PyJWT is not required). Kong's jwt
-plugin verifies the signature with the consumer's `secret` and matches the
-`key` against the token `iss` claim, so --iss must be fintech-free or
-fintech-premium to authenticate.
+Uses PyJWT, pinned in `requirements-dev.txt`. Kong's jwt plugin verifies the
+signature with the consumer's `secret` and matches the `key` against the
+token `iss` claim, so --iss must be fintech-free or fintech-premium to
+authenticate.
 
 Examples:
   python scripts/make_jwt.py --iss fintech-free
@@ -14,11 +14,19 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
-import hmac
-import json
 import time
+import warnings
+
+try:
+    import jwt
+    from jwt.warnings import InsecureKeyLengthWarning
+except ImportError as exc:  # pragma: no cover - dependency guard
+    raise SystemExit(
+        "PyJWT is required: python -m pip install -r requirements-dev.txt"
+    ) from exc
+
+# The committed secrets are deliberate short demo fixtures, not real keys.
+warnings.filterwarnings("ignore", category=InsecureKeyLengthWarning)
 
 SECRETS = {
     "fintech-free": "free-jwt-secret",
@@ -26,21 +34,17 @@ SECRETS = {
 }
 
 
-def b64url(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-
-
 def make_jwt(issuer: str, secret: str, ttl: int = 300, tamper: bool = False) -> str:
+    """Return a signed HS256 JWT; tamper=True signs with a deliberately wrong key."""
     now = int(time.time())
-    header = {"alg": "HS256", "typ": "JWT"}
     payload = {"iss": issuer, "iat": now, "exp": now + ttl}
-    head = b64url(json.dumps(header, separators=(",", ":")).encode())
-    body = b64url(json.dumps(payload, separators=(",", ":")).encode())
-    signing_input = f"{head}.{body}"
-    signature = hmac.new(secret.encode(), signing_input.encode(), hashlib.sha256).digest()
-    if tamper:
-        signature = bytes([signature[0] ^ 0xFF]) + signature[1:]
-    return f"{signing_input}.{b64url(signature)}"
+    signing_secret = secret + "-tampered" if tamper else secret
+    return jwt.encode(
+        payload,
+        signing_secret,
+        algorithm="HS256",
+        headers={"typ": "JWT"},
+    )
 
 
 def main() -> int:

@@ -8,14 +8,26 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/certs"
 FRAGMENT="$ROOT/kong/fragments/50-tls.yml"
 mkdir -p "$OUT"
+if ! command -v openssl >/dev/null 2>&1; then
+  echo "openssl not found; add real OpenSSL (Git for Windows usr/bin) to PATH" >&2
+  exit 1
+fi
 
-openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 365 \
+# Git Bash path-converts /CN=... unless MSYS_NO_PATHCONV is set, while the
+# Windows OpenSSL binary needs native paths for its output files.
+OUT_WIN="$(cygpath -w "$OUT" 2>/dev/null || echo "$OUT")"
+FRAGMENT_WIN="$(cygpath -w "$FRAGMENT" 2>/dev/null || echo "$FRAGMENT")"
+MSYS_NO_PATHCONV=1 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 365 \
   -subj "/CN=localhost/O=FinTech Gateway Demo" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
-  -keyout "$OUT/localhost.key" \
-  -out "$OUT/localhost.crt" 2>/dev/null
+  -keyout "$OUT_WIN/localhost.key" \
+  -out "$OUT_WIN/localhost.crt" 2>/dev/null
 
-python3 - "$OUT/localhost.crt" "$OUT/localhost.key" "$FRAGMENT" <<'PY'
+PYTHON_BIN="${PYTHON:-python3}"
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  PYTHON_BIN="python"
+fi
+"$PYTHON_BIN" - "$OUT_WIN/localhost.crt" "$OUT_WIN/localhost.key" "$FRAGMENT_WIN" <<'PY'
 import sys
 from pathlib import Path
 
