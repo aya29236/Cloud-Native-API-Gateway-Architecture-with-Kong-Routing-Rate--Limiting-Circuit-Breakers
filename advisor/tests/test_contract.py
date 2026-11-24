@@ -26,7 +26,10 @@ def test_health_returns_exact_c1_shape():
     assert response.json() == {"status": "healthy"}
 
 
-def test_analyze_stub_returns_safe_no_verified_data_answer():
+def test_analyze_returns_safe_no_verified_data_without_a_log_source(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("ADVISOR_LOG_PATH", str(tmp_path / "missing-access.json"))
     response = client.post("/analyze", json={"question": "Why were there 429s?"})
 
     assert response.status_code == 200
@@ -36,7 +39,10 @@ def test_analyze_stub_returns_safe_no_verified_data_answer():
     assert body["verified"] is False
     assert body["stats"] == {}
     assert body["citations"] == []
-    assert body["tool_trace"] == []
+    assert [entry["tool"] for entry in body["tool_trace"]] == [
+        "read_logs",
+        "verify_answer",
+    ]
 
 
 @pytest.mark.parametrize(

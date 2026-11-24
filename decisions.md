@@ -61,3 +61,7 @@
 ## DEC-015 — Layer 4 / M1 Prometheus implementation
 - Status: Applied after explicit A/B/C approval for the next implementation step
 - Decision: `monitoring/prometheus.yml` scrapes `kong:8100/metrics` every 5s and alerts `alertmanager:9093`; `monitoring/rules/alerts.yml` implements the three frozen C3 v0.2.1 expressions; `scripts/verify_metrics_contract.py` performs the live M1 check. Prometheus is pinned to `v3.16.0` in Compose and CI, which now runs both `promtool check config` and `promtool check rules`.
+
+## DEC-016 — Layer 5 / M5 verified analyzer
+- Status: Applied after explicit A/B/C approval for the next implementation step
+- Decision: The V3.1 stub is replaced by `advisor/app/analyzer.py`, a deterministic tool loop (`read_logs`, `filter_records`, `aggregate`, `verify_answer`) that answers only from C2-valid records in the read-only Kong log mount. Citations `[L<id>]` and every summary number are checked against the records loaded for that request; any unsupported result returns the exact C1 fallback `"No verified data"` with `verified=false`. No external LLM or network call is introduced. `/stats` and `/stats/<name>` now expose the same verified aggregate, and Compose sets `ADVISOR_LOG_PATH=/var/log/kong/access.json` on both replicas.

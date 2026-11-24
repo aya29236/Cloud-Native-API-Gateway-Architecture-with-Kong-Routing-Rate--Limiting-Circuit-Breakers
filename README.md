@@ -114,9 +114,27 @@ Accounts and Payments share one PostgreSQL 16 database (DEC-008); table names ar
 
 - [x] V3.1 FastAPI shell, `/health`, Pydantic C1 models, stub `/analyze` ("No verified data"), `/stats`, `X-Served-By` (8 tests green)
 - [x] V3.2 `advisor-1`/`advisor-2` containers with read-only `kong-logs` mount (8/8 green inside the container)
-- [ ] C plugs the verified analyzer into the shell (Layer 5)
+- [x] V3.3 Layer 5 verified tool-calling analyzer: `read_logs` → `filter_records` → `aggregate` → `verify_answer`, with exact C1 fallback when no tool result supports the question
 
 FastAPI serves Swagger UI at `http://127.0.0.1:8000/docs` once Kong routes `/api/advisor` at Layer 1. Locally: `cd advisor; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload`.
+
+### Layer 5 / M5 — verified analyzer
+
+`advisor/app/analyzer.py` never invents an answer or calls an external LLM. It reads only the read-only `/var/log/kong/access.json` mount (`ADVISOR_LOG_PATH`), accepts only C2 0.1.1-valid records, and returns citations `[L<id>]` whose ids are checked against the records loaded for that request. Every number in the summary comes from the `aggregate` tool result. If there are no valid records, no matching records, a forged citation, or any other failed check, the response is exactly `summary: "No verified data"`, `verified: false`, `citations: []`.
+
+```powershell
+cd advisor
+.\.venv\Scripts\python.exe -m pytest
+
+# Live through Kong after rebuilding the advisor replicas:
+docker compose --profile core up -d --build advisor-1 advisor-2
+curl.exe -s -X POST http://127.0.0.1:8000/api/advisor/analyze `
+  -H "apikey: premium-demo-key" -H "Content-Type: application/json" `
+  --data '{"question":"How many requests were logged?"}'
+curl.exe -s http://127.0.0.1:8000/api/advisor/stats -H "apikey: premium-demo-key"
+```
+
+The response carries the five frozen C1 fields plus a `tool_trace` that names each tool, its arguments and its result. No raw Kong headers or credentials are copied into the trace.
 
 ## Monitoring and automation — Student B (M2/M3)
 

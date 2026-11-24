@@ -40,6 +40,8 @@ x-advisor-common: &advisor-common
   build:
     context: ./advisor
   image: fintech-advisor:dev
+  environment:
+    ADVISOR_LOG_PATH: /var/log/kong/access.json
   volumes:
     - kong-logs:/var/log/kong:ro
   networks:
