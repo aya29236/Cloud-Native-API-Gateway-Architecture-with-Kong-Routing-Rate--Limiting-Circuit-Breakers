@@ -47,7 +47,7 @@ jobs:
           expected = {
               "contracts/api/openapi.yml": "version: 0.3.0",
               "contracts/metrics/alerts-contract.yml": "contract_version: 0.2.1",
-              "contracts/naming/environment.yml": "contract_version: 0.2.0",
+              "contracts/naming/environment.yml": "contract_version: 0.2.1",
           }
           for name, needle in expected.items():
               assert needle in Path(name).read_text(encoding="utf-8"), name

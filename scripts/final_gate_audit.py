@@ -98,8 +98,24 @@ def check_contracts() -> None:
     add(gate, "C1 version", "version: 0.3.0" in c1)
     add(gate, "C2 version/frozen", '"contract_version": "0.1.1"' in c2 and '"frozen": true' in c2)
     add(gate, "C3 version", "contract_version: 0.2.1" in c3)
-    add(gate, "C4 version", "contract_version: 0.2.0" in c4)
+    add(gate, "C4 version", "contract_version: 0.2.1" in c4)
     add(gate, "approvals", all("Wafe Bziouiche" in value for value in (c1, c3, c4)))
+    readme = text("README.md")
+    add(
+        gate,
+        "DB-less vs Postgres theory",
+        all(
+            marker in readme
+            for marker in (
+                "## Kong deployment modes — theory overview",
+                "DB-less declarative mode (implemented)",
+                "PostgreSQL mode (theory only)",
+                "kong migrations bootstrap",
+                "kong config db_import",
+            )
+        )
+        and "dbmode_lab" not in c4,
+    )
 
 
 def check_topology() -> None:

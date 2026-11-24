@@ -82,10 +82,17 @@
 
 ## DEC-020 — Final Gate audit
 - Status: Applied after explicit A/B/C approval for the Final Gate audit
-- Decision: `scripts/final_gate_audit.py` is the reproducible stdlib-only Final Gate audit. Its current result is `PASS WITH WARNINGS`: 52/52 automated checks pass across C1–C4 contracts, Kong topology/healthchecks, live C1 auth/headers, live C2 log fields, C3 Prometheus/Alertmanager/n8n, C4 Compose/load generators, Layer 5 analyzer, evidence files, CI structure and branch invariants.
+- Decision: `scripts/final_gate_audit.py` is the reproducible stdlib-only Final Gate audit. Its current result is `PASS WITH WARNINGS`: 53/53 automated checks pass across C1–C4 contracts, Kong topology/healthchecks, live C1 auth/headers, live C2 log fields, C3 Prometheus/Alertmanager/n8n, C4 Compose/load generators, Layer 5 analyzer, evidence files, CI structure and branch invariants.
 - Decision: The audit intentionally reports open items as WARN rather than marking them complete: owner evidence IDs `10`, `11`, `13`, `14`; the Gate 0 checkbox for the LLM tool-calling spike; absent Telegram credentials; and the inability to re-read `main` branch protection without an authenticated GitHub token. The professor-questions checkbox was subsequently confirmed sent by A/B/C and is now checked.
 - Decision: Evidence `screenshots/25_final_gate_audit.png` is a direct screenshot of a visible PowerShell window running that audit. The capture returned `RESULT: PASS`.
 
 ## DEC-021 — Gate 0 professor questions closed
 - Status: Approved by A Eya Derouiche, B Aya Fayachi and C Wafe Bziouiche
 - Decision: The Gate 0 item "Open questions sent to professor" is marked complete. The LLM tool-calling spike remains open because A/B/C did not approve the V3.3 analyzer as that specific spike and have not supplied the separate spike record. Owner evidence IDs `10`, `11` and `13` also remain open pending the exact Master Plan topics; evidence `14` stays documented as blocked on Telegram credentials.
+
+## DEC-022 — Kong DB-mode theory only
+- Status: Approved by A Eya Derouiche, B Aya Fayachi and C Wafe Bziouiche
+- Decision: The professor's énoncé requires an overview of Kong DB-less declarative mode versus PostgreSQL mode, not a practical DB-mode lab. A/B/C chose "no lab; add theory only".
+- Decision: `README.md` now contains a paste-ready "Kong deployment modes — theory overview" section with a mode comparison, bootstrap commands, Admin API read/write distinction, and the teaching point that Git-owned YAML is the source of truth in DB-less mode while PostgreSQL and migrations are the source of truth in DB mode. No `docker-compose.dbmode.yml` is created or claimed.
+- Decision: C4 is bumped by an editorial PATCH from `0.2.0` to `0.2.1` to remove the unimplemented `dbmode_lab` promise and record the theory-only scope. No names, ports, profiles, service behaviour or evidence semantics change. The CI expected contract string and `contracts/README.md` table are updated with it.
+- Decision: Evidence `screenshots/25_final_gate_audit.png` is recaptured after the audit gains the DB-less-vs-Postgres theory check; the audit remains `PASS WITH WARNINGS` with 53/53 automated checks.

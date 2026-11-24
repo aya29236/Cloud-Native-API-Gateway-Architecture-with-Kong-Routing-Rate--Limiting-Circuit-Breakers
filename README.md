@@ -30,14 +30,56 @@ Stop:
 docker compose --profile core down
 ```
 
+## Kong deployment modes — theory overview
+
+This section is the written version of the professor's required comparison between Kong's two installation modes. It can be pasted directly into the presentation. The implemented prototype uses **DB-less mode only**; A/B/C approved a theory-only treatment of PostgreSQL mode, so no separate `docker-compose.dbmode.yml` lab is claimed.
+
+| Aspect | DB-less declarative mode (implemented) | PostgreSQL mode (theory only) |
+|---|---|---|
+| Source of truth | `kong/kong.yml` | Kong's PostgreSQL database |
+| Key environment | `KONG_DATABASE=off`, `KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml` | `KONG_DATABASE=postgres`, `KONG_PG_HOST`, `KONG_PG_DATABASE`, `KONG_PG_USER`, `KONG_PG_PASSWORD` |
+| Admin API | Read-only; changes are made by editing YAML and reloading/recreating Kong | Read/write; `GET/POST/PATCH/DELETE /services`, `/routes`, `/consumers`, `/plugins` mutate the database |
+| Bootstrap | `kong config parse kong.yml`, then start Kong with the file mounted | Start Postgres, run `kong migrations bootstrap`, start Kong, optionally `kong config db_import kong.yml` once |
+| Reload behaviour | Declarative config is loaded at startup; no migration state to manage | Schema migrations must be versioned and applied before upgrade |
+| Best fit | Reproducible labs, CI, GitOps, immutable prototypes | Long-lived platforms with dynamic Admin API changes and multiple operators |
+| Failure domain | Losing the container loses no gateway state; YAML remains in Git | Database availability and backups become critical |
+| In this project | `docker-compose.yml`, `kong/kong.yml`, evidence `01`, `02`, `03` | Explained here only; not implemented |
+
+Typical DB-less commands used by this project:
+
+```powershell
+docker compose exec kong kong config parse /etc/kong/kong.yml
+docker compose --profile core up -d --force-recreate kong
+curl.exe http://127.0.0.1:8001/services
+curl.exe -X DELETE http://127.0.0.1:8001/services/mock-upstream  # returns 405
+```
+
+Typical PostgreSQL-mode commands for the presentation, **not run in this prototype**:
+
+```bash
+# 1. Start a PostgreSQL container and a Kong container on separate ports.
+# 2. Initialise Kong's schema:
+kong migrations bootstrap
+
+# 3. Optional one-time import of the same declarative entities:
+kong config db_import /etc/kong/kong.yml
+
+# 4. Start Kong with KONG_DATABASE=postgres and the KONG_PG_* variables.
+# 5. Prove dynamic configuration through the Admin API:
+curl -i -X POST http://127.0.0.1:8001/services \
+  --data name=demo --data url=http://accounts-1:8000
+```
+
+The teaching point: DB-less Kong treats `kong.yml` as immutable desired state, while PostgreSQL-mode Kong treats the Admin API and the database as live mutable state. Both expose the same proxy/plugin model; they differ in how configuration is stored, changed and operated.
+
 ## Gate 0 status
 - [x] Initial repository layout
-- [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3 v0.2.1, C4 v0.2.0)
+- [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3 v0.2.1, C4 v0.2.1)
 - [x] Sample Kong access-log fixture
 - [x] Fake Alertmanager payload fixture
 - [x] Mock upstream with `/health`, `/echo`, `/fail`, `/slow`
 - [x] Compose skeleton and core profile
-- [x] CI workflow implemented (branch protection still to be configured on GitHub)
+- [x] Branch protection configured on GitHub (re-verification requires an authenticated token)
 - [x] All three students approve contracts
 - [ ] LLM tool-calling spike completed by all three
 - [x] Open questions sent to professor
@@ -248,7 +290,7 @@ Evidence (real screenshots of the PowerShell terminal window, captured by `scrip
 | 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 15 Advisor tests green, verified overview, 429 answer with citations, grounded client-IP stats, exact 503 fallback, and `/stats` through Kong |
 | 23 | `screenshots/23_layer4_prometheus_m1.png` | PNG | repo `screenshots/` | M1 contract check PASS, promtool config/rules SUCCESS, Kong target up, 3 rules loaded, Alertmanager connected |
 | 24 | `screenshots/24_layer3_chaos_failover.png` | PNG | repo `screenshots/` | active/passive healthchecks, k6 load with `accounts-2` offline, UNHEALTHY → HEALTHY recovery, 0% failures, Locust cross-check |
-| 25 | `screenshots/25_final_gate_audit.png` | PNG | repo `screenshots/` | `scripts/final_gate_audit.py` PASS on all 52 automated checks, with explicit WARN items |
+| 25 | `screenshots/25_final_gate_audit.png` | PNG | repo `screenshots/` | `scripts/final_gate_audit.py` PASS on all 53 automated checks, with explicit WARN items |
 
 Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG is a direct screenshot of a visible PowerShell window running the live commands; regenerate one with:
 
@@ -401,7 +443,7 @@ Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`
 
 ## Final Gate audit
 
-`scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 52/52 automated checks pass, while the script deliberately reports these open items instead of hiding them:
+`scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 53/53 automated checks pass, while the script deliberately reports these open items instead of hiding them:
 
 - Owner evidence IDs `10`, `11`, `13` and `14` are not present in `screenshots/`; `14` remains blocked on Telegram test credentials.
 - Gate 0 still has one unchecked question: the LLM tool-calling spike completed by all three students. The professor-questions item is now confirmed sent by A/B/C.
