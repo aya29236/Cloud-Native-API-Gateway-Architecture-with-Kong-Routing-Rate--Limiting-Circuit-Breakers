@@ -1,25 +1,196 @@
-name: Gate 0 validation
+name: Kong FinTech CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+  KONG_IMAGE: "kong:3.9.1"
+  POSTGRES_DB: accounts
+  POSTGRES_USER: accounts
+  POSTGRES_PASSWORD: accounts_dev
 
 jobs:
-  repository-checks:
+  p3a-repository-checks:
+    name: P3a repository checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate JSON fixtures
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate JSON fixtures, schema and frozen contract versions
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+
           for path in Path("fixtures").glob("*.json"):
               json.loads(path.read_text(encoding="utf-8"))
-              print(f"valid JSON: {path}")
-          json.loads(Path("contracts/logs/kong-access-log.schema.json").read_text(encoding="utf-8"))
-          print("valid JSON Schema document")
+              print(f"valid JSON fixture: {path}")
+
+          schema = json.loads(
+              Path("contracts/logs/kong-access-log.schema.json").read_text(encoding="utf-8")
+          )
+          assert schema["contract_version"] == "0.1.1"
+          assert schema["status"] == "approved" and schema["frozen"] is True
+          print("C2 valid and frozen at 0.1.1")
+
+          expected = {
+              "contracts/api/openapi.yml": "version: 0.3.0",
+              "contracts/metrics/alerts-contract.yml": "contract_version: 0.2.0",
+              "contracts/naming/environment.yml": "contract_version: 0.2.0",
+          }
+          for name, needle in expected.items():
+              assert needle in Path(name).read_text(encoding="utf-8"), name
+              print(f"frozen contract marker OK: {name}")
           PY
-      - name: Validate Compose configuration
-        run: docker compose --profile core config --quiet
+
+      - name: Parse live declarative Kong config with Kong 3.9.1
+        run: |
+          docker run --rm \
+            -e KONG_DATABASE=off \
+            -v "$GITHUB_WORKSPACE/kong:/etc/kong:ro" \
+            "$KONG_IMAGE" kong config parse /etc/kong/kong.yml
+
+      - name: Validate Compose profiles
+        run: docker compose --profile core --profile monitoring config --quiet
+
+      - name: Check evidence filenames
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          names = sorted(p.name for p in Path("screenshots").glob("*.png"))
+          assert names, "no numbered evidence captured yet"
+          for name in names:
+              assert re.fullmatch(r"\d{2}_[A-Za-z0-9_-]+\.png", name), name
+          print("evidence filenames OK:", ", ".join(names))
+          PY
+
+      - name: Lint Python sources
+        run: |
+          python -m pip install --disable-pip-version-check ruff
+          python -m ruff check --select E9,F63,F7,F82 \
+            services advisor scripts tests n8n mock-upstream
+
+  p3b-python-and-kong:
+    name: P3b pytest + Kong parse + plugin mocks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: accounts
+          POSTGRES_USER: accounts
+          POSTGRES_PASSWORD: accounts_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U accounts -d accounts"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pinned service dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            -r services/accounts/requirements.txt \
+            -r services/payments/requirements.txt \
+            -r advisor/requirements.txt
+
+      - name: Accounts pytest (V1)
+        run: cd services/accounts && python -m pytest
+
+      - name: Payments pytest (V2)
+        run: cd services/payments && python -m pytest
+
+      - name: Advisor pytest (V3)
+        run: cd advisor && python -m pytest
+
+      - name: Plugin simulator + fragment merge tests
+        run: python -m pytest tests/fragments -q
+
+      - name: Parse every independent-wave fragment with Kong 3.9.1
+        run: python scripts/fragment_lab.py parse kong/fragments/*.yml
+
+  p3c-platform-and-images:
+    name: P3c platform gates + image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Alertmanager config check (amtool)
+        run: |
+          docker run --rm \
+            --entrypoint amtool \
+            -v "$GITHUB_WORKSPACE/monitoring:/etc/alertmanager:ro" \
+            prom/alertmanager:v0.28.1 \
+            check-config /etc/alertmanager/alertmanager.yml
+
+      - name: Prometheus rules check (promtool, when Layer 4 rules exist)
+        run: |
+          if compgen -G "monitoring/rules/*.yml" > /dev/null; then
+            docker run --rm \
+              -v "$GITHUB_WORKSPACE/monitoring:/monitoring:ro" \
+              prom/prometheus:latest \
+              promtool check rules /monitoring/rules/*.yml
+          else
+            echo "promtool: no monitoring/rules/*.yml yet (Layer 4); skipped"
+          fi
+
+      - name: Verifier / eval structural gate
+        run: python n8n/workflows/validate.py
+
+      - name: Build all service images
+        run: |
+          for context in services/accounts services/payments advisor mock-upstream; do
+            docker build --quiet --tag "ci-${context//\//-}:test" "$context" >/dev/null
+            echo "image build OK: $context"
+          done
+
+  ci-green-gate:
+    name: CI green gate
+    needs:
+      - p3a-repository-checks
+      - p3b-python-and-kong
+      - p3c-platform-and-images
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Fail unless every required job succeeded
+        run: |
+          results=(
+            "${{ needs.p3a-repository-checks.result }}"
+            "${{ needs.p3b-python-and-kong.result }}"
+            "${{ needs.p3c-platform-and-images.result }}"
+          )
+          for result in "${results[@]}"; do
+            if [ "$result" != "success" ]; then
+              echo "required job result: $result"
+              exit 1
+            fi
+          done
+          echo "P3a, P3b and P3c are green"

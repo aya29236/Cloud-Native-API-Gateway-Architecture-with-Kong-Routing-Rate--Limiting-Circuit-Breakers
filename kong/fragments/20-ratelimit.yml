@@ -1,0 +1,34 @@
+# G3 (Student C) - tiered per-consumer rate limiting (G3, R32, R36).
+# Independent-wave fragment: NOT merged into kong.yml until Layer 2 (I3).
+#
+# What the built-in Kong 3.9 `rate-limiting` plugin counts (per Kong 3.9 docs):
+#   * requests in a FIXED window (second/minute/hour/day/month/year), keyed by
+#     the authenticated Consumer when an auth plugin is configured, otherwise
+#     by client IP (`limit_by: consumer` here);
+#   * `policy: local` keeps counters in this Kong node's in-memory dict
+#     (kong_rate_limiting_counters) - fast, but not shared across replicas;
+#   * clients receive X-RateLimit-Limit-Minute / X-RateLimit-Remaining-Minute
+#     and Retry-After on 429; body {"message":"API rate limit exceeded"}.
+# Free: 10 requests/minute. Premium: 100 requests/minute.
+
+# Consumers are declared once in 10-auth.yml; this fragment only attaches
+# policies to those existing consumers.
+
+plugins:
+  - name: rate-limiting
+    consumer: fintech-free
+    config:
+      minute: 10
+      limit_by: consumer
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  - name: rate-limiting
+    consumer: fintech-premium
+    config:
+      minute: 100
+      limit_by: consumer
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false

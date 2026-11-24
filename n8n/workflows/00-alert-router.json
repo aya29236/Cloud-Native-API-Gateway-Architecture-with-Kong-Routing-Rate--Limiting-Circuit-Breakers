@@ -1,0 +1,135 @@
+{
+  "name": "00 Alert Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "alertmanager",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        200
+      ],
+      "webhookId": "a1ertmanager-router-0001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = ($input.first().json.body || $input.first().json);\nconst alerts = body.alerts || [];\nconst alert = alerts.find(a => a.status === 'firing') || alerts[0] || {};\nconst labels = alert.labels || {};\nconst annotations = alert.annotations || {};\nreturn [{\n  json: {\n    alertname: labels.alertname || '',\n    route: labels.route || '',\n    consumer: labels.consumer || '',\n    service: labels.service || '',\n    severity: labels.severity || '',\n    upstream: labels.upstream || '',\n    target: labels.target || '',\n    summary: annotations.summary || '',\n    description: annotations.description || '',\n    startsAt: alert.startsAt || '',\n    fingerprint: alert.fingerprint || '',\n    receiver: body.receiver || '',\n    status: body.status || ''\n  }\n, pairedItem: { item: 0 } }];"
+      },
+      "id": "11111111-1111-4111-8111-111111111112",
+      "name": "Normalize alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "output": "={{ $json.alertname === 'KongCircuitOpen' || $json.alertname === 'KongUpstreamTargetUnhealthy' ? 0 : ($json.alertname === 'Kong429Spike' ? 1 : -1) }}",
+        "options": {}
+      },
+      "id": "11111111-1111-4111-8111-111111111113",
+      "name": "Switch on alertname",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -160,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/circuit-open",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "11111111-1111-4111-8111-111111111114",
+      "name": "Call circuit-open workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/429",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "11111111-1111-4111-8111-111111111115",
+      "name": "Call 429 workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize alert": {
+      "main": [
+        [
+          {
+            "node": "Switch on alertname",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch on alertname": {
+      "main": [
+        [
+          {
+            "node": "Call circuit-open workflow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 429 workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

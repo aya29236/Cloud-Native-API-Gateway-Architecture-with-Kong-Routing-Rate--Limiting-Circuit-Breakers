@@ -1,0 +1,44 @@
+_format_version: "3.0"
+_transform: true
+
+# Independent-wave lab base: the three real service/route names point at the
+# deterministic Gate 0 mock upstream. Fragment files are concatenated to this
+# base by scripts/fragment_lab.py, so each plugin is tested exactly as it will
+# be attached at Layer 2, but without touching the live kong.yml.
+
+services:
+  - name: mock-upstream
+    url: http://mock-upstream:8080
+    routes:
+      - name: mock-route
+        paths:
+          - /mock
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+
+  - name: accounts
+    url: http://mock-upstream:8080
+    routes:
+      - name: accounts-route
+        paths:
+          - /api/accounts
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+
+  - name: payments
+    url: http://mock-upstream:8080
+    routes:
+      - name: payments-route
+        paths:
+          - /api/payments
+        strip_path: true
+        methods: [GET, POST, OPTIONS]
+
+  - name: advisor
+    url: http://mock-upstream:8080
+    routes:
+      - name: advisor-route
+        paths:
+          - /api/advisor
+        strip_path: true
+        methods: [GET, POST, OPTIONS]

@@ -1,0 +1,29 @@
+# Alertmanager configuration — C3 v0.2.0 (approved, frozen).
+#
+# Prometheus rules (Student C, M1) fire the three alerts named in C3.
+# Alertmanager groups them, inhibits the redundant circuit-open alert when
+# the target-unhealthy alert is already firing, and sends everything to the
+# n8n router webhook that Student B builds in M3.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: n8n-webhook
+  group_by: ["alertname", "service"]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 4h
+
+receivers:
+  - name: n8n-webhook
+    webhook_configs:
+      - url: http://n8n:5678/webhook/alertmanager
+        send_resolved: true
+
+# A single unhealthy upstream target is the root cause; suppress the
+# derived "circuit open" alert for the same service.
+inhibit_rules:
+  - source_matchers: ['alertname="KongUpstreamTargetUnhealthy"']
+    target_matchers: ['alertname="KongCircuitOpen"']
+    equal: ["service"]

@@ -1,0 +1,25 @@
+{
+  "version": "4",
+  "status": "firing",
+  "receiver": "n8n-webhook",
+  "groupKey": "{}:{alertname=\"Kong429Spike\"}",
+  "alerts": [
+    {
+      "status": "firing",
+      "labels": {
+        "alertname": "Kong429Spike",
+        "route": "payments",
+        "consumer": "fintech-free",
+        "service": "payments",
+        "severity": "warning"
+      },
+      "annotations": {
+        "summary": "429 spike on payments for fintech-free",
+        "description": "More than 0.5 HTTP 429 responses per second for 30 seconds."
+      },
+      "startsAt": "2026-11-22T10:05:00.000Z",
+      "endsAt": "0001-01-01T00:00:00.000Z",
+      "fingerprint": "b2c3d4e5f6071829"
+    }
+  ]
+}

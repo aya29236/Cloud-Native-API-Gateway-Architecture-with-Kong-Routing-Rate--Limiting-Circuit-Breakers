@@ -1,0 +1,151 @@
+{
+  "name": "20 429 Spike Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "429",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "33333333-3333-4333-8333-333333333331",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -600,
+        200
+      ],
+      "webhookId": "429-spike-handler-0020"
+    },
+    {
+      "parameters": {
+        "jsCode": "const a = ($input.first().json.body || $input.first().json);\nconst route = a.route || 'unknown';\nconst consumer = a.consumer || 'unknown';\nconst window = a.startsAt ? ` since ${a.startsAt}` : '';\nconst question = `Explain the HTTP 429 spike on Kong route ${route} for consumer ${consumer}${window}. Identify the offending client IPs and routes from the Kong access logs in that window, compare them with the consumer rate-limit tier, and cite the supporting log line ids in the form [L<id>].`;\nreturn [{ json: { question, alert: a } , pairedItem: { item: 0 } }];"
+      },
+      "id": "33333333-3333-4333-8333-333333333332",
+      "name": "Build advisor question",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ADVISOR_URL }}",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ question: $json.question }) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.ADVISOR_APIKEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "33333333-3333-4333-8333-333333333333",
+      "name": "Advisor via Kong (apikey)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -160,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = $('Build advisor question').first().json;\nconst adv = $input.first().json || {};\nconst a = q.alert || {};\nconst summary = adv && adv.summary ? adv.summary : 'No verified data';\nconst citations = adv && Array.isArray(adv.citations) ? adv.citations.join(' ') : '';\nconst text = [\n  `ALERT ${a.alertname || 'Kong429Spike'}`,\n  a.summary || '',\n  `route=${a.route || '-'} consumer=${a.consumer || '-'} severity=${a.severity || '-'}`,\n  `Advisor: ${summary}`,\n  citations ? `Citations: ${citations}` : '',\n  a.description || ''\n].filter(Boolean).join('\\n');\nreturn [{ json: { chat_id: $env.TELEGRAM_CHAT_ID, text } , pairedItem: { item: 0 } }];"
+      },
+      "id": "33333333-3333-4333-8333-333333333334",
+      "name": "Format notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        60,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TELEGRAM_API_BASE }}/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "33333333-3333-4333-8333-333333333335",
+      "name": "Post to channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build advisor question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build advisor question": {
+      "main": [
+        [
+          {
+            "node": "Advisor via Kong (apikey)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Advisor via Kong (apikey)": {
+      "main": [
+        [
+          {
+            "node": "Format notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format notification": {
+      "main": [
+        [
+          {
+            "node": "Post to channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

@@ -1,0 +1,74 @@
+Independent wave G2-G7 - verification transcript (Student A / Student C, checked by Student B)
+============================================================================================
+All fragments were parsed with the real Kong 3.9.1 binary via
+  python scripts/fragment_lab.py parse <fragments...>
+and tested against the Gate 0 mock upstream through throwaway Kong containers
+created by scripts/fragment_lab.py. The live kong.yml was NOT modified.
+
+G2 10-auth.yml (Student A)
+-------------------------
+parse successful
+accounts no key:       401
+accounts free key:     200
+accounts bad key:      401
+advisor no key:        401
+advisor premium key:   200
+payments no jwt:       401
+payments valid jwt:    200  (python scripts/make_jwt.py --iss fintech-free)
+payments premium jwt:  200
+payments bad jwt:      401  (--bad-signature)
+payments wrong iss:    401  (--secret wrong-secret)
+
+G3 20-ratelimit.yml (Student C)
+-------------------------------
+parse successful (combined with 10-auth.yml)
+free burst 12 requests, limit 10/min:
+  200,200,200,200,200,200,200,200,200,200,429,429
+premium burst 12 requests, limit 100/min:
+  200 x 12
+429 response headers include X-RateLimit-Limit-Minute: 10,
+  X-RateLimit-Remaining-Minute: 0, plus Retry-After.
+Kong 3.9 docs confirm: fixed window, `limit_by: consumer`, `policy: local`
+  (per-node in-memory counters), body {"message":"API rate limit exceeded"}.
+
+G4 25-tokenbucket.yml + kong/plugins/token-bucket (Student A)
+--------------------------------------------------------------
+parse successful (KONG_PLUGINS=bundled,token-bucket)
+simulator: 111110000000
+live Kong: 111110000000
+burst parity: PASS
+after 1.2 s refill: HTTP 200 (PASS)
+premium 12 requests: [200 x 12] (PASS)
+Live plugin: free capacity 5 @ 1 token/s, premium capacity 50 @ 10 tokens/s;
+  429 adds Retry-After + X-Token-Bucket-Remaining; PRIORITY 750 below auth.
+
+G5 50-tls.yml + scripts/gen_cert.sh (Student A)
+------------------------------------------------
+parse successful
+HTTPS localhost:8443 -> 200 with --cacert certs/localhost.crt
+openssl s_client -servername localhost:
+  subject=CN=localhost, O=FinTech Gateway Demo
+  issuer=CN=localhost, O=FinTech Gateway Demo
+  X509v3 Subject Alternative Name: DNS:localhost, IP Address:127.0.0.1
+Upstream traffic remains plain HTTP.
+
+G6 30-transform.yml (Student C)
+-------------------------------
+parse successful
+Kong-Request-ID: af1d8a03-658d-4c27-91be-a5402fca8de0#1 (correlation-id)
+mock /echo headers: x_gateway=fintech-kong, x_debug=null (request-transformer)
+CORS preflight OPTIONS: 200, Access-Control-Allow-Origin: http://localhost:3000,
+  Allow-Methods: GET,POST,OPTIONS, Allow-Headers: apikey,Authorization,Content-Type,
+  Expose-Headers: X-RateLimit-Limit-Minute,X-RateLimit-Remaining-Minute,
+  Retry-After,Kong-Request-ID
+Request over 1 MB: 413 (request-size-limiting)
+
+G7 40-telemetry.yml (Student A)
+-------------------------------
+parse successful
+Prometheus :8100/metrics exposes 107 kong_* samples, including
+  kong_http_requests_total, kong_kong_latency_ms, kong_bandwidth_bytes.
+file-log /var/log/kong/access.json line fields:
+  client_ip, request{method,uri}, response{status}, latencies, started_at,
+  route{name}, service{name} -> all C2 0.1.1 required fields present;
+  no contract version bump needed.
