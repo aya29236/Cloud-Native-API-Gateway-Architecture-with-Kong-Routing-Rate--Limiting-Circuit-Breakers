@@ -40,7 +40,7 @@ docker compose --profile core down
 - [x] CI workflow implemented (branch protection still to be configured on GitHub)
 - [x] All three students approve contracts
 - [ ] LLM tool-calling spike completed by all three
-- [ ] Open questions sent to professor
+- [x] Open questions sent to professor
 
 ## Continuous integration
 
@@ -404,7 +404,7 @@ Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`
 `scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 52/52 automated checks pass, while the script deliberately reports these open items instead of hiding them:
 
 - Owner evidence IDs `10`, `11`, `13` and `14` are not present in `screenshots/`; `14` remains blocked on Telegram test credentials.
-- Gate 0 still has two unchecked questions: the LLM tool-calling spike completed by all three students, and open questions sent to the professor.
+- Gate 0 still has one unchecked question: the LLM tool-calling spike completed by all three students. The professor-questions item is now confirmed sent by A/B/C.
 - No authenticated GitHub token was available to re-read `main` branch protection; the earlier applied protection is unchanged but not re-verified in this run.
 
 ```powershell
