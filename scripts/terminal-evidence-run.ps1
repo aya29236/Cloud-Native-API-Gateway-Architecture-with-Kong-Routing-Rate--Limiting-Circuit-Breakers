@@ -237,6 +237,55 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
     Finish ([bool]($samples.Count -eq 3 -and $hook -eq '200' -and ($notify -match 'NOTIFICATION').Count -gt 0))
   }
 
+  '22' {
+    $headers = @{ apikey = 'premium-demo-key' }
+    $analyze = 'http://127.0.0.1:8000/api/advisor/analyze'
+    Wait-Kong
+
+    Show '.\advisor\.venv\Scripts\python.exe -m pytest advisor -v'
+    $tests = & .\advisor\.venv\Scripts\python.exe -m pytest advisor -v 2>&1 | Select-Object -Last 6
+    $tests | ForEach-Object { Write-Host $_ }
+    $testsOk = [bool](($tests -join "`n") -match '14 passed')
+
+    Show 'Invoke-RestMethod POST /api/advisor/analyze {"question":"How many requests were logged?"}'
+    $overview = Invoke-RestMethod -Method Post -Uri $analyze -Headers $headers -ContentType 'application/json' -Body '{"question":"How many requests were logged?"}'
+    $overviewCitations = ($overview.citations | Select-Object -First 3) -join ', '
+    if ($overview.citations.Count -gt 3) { $overviewCitations += " (+$($overview.citations.Count - 3) more)" }
+    Write-Host ("summary : " + $overview.summary)
+    Write-Host ("verified: " + $overview.verified)
+    Write-Host ("requests_total: " + $overview.stats.requests_total)
+    Write-Host ("citations: " + $overviewCitations)
+    Write-Host ("tools: " + (($overview.tool_trace | ForEach-Object { $_.tool }) -join ' -> '))
+
+    Show 'Invoke-RestMethod POST /api/advisor/analyze {"question":"Why were there 429s?"}'
+    $spike = Invoke-RestMethod -Method Post -Uri $analyze -Headers $headers -ContentType 'application/json' -Body '{"question":"Why were there 429s?"}'
+    $spikeCitations = ($spike.citations | Select-Object -First 3) -join ', '
+    if ($spike.citations.Count -gt 3) { $spikeCitations += " (+$($spike.citations.Count - 3) more)" }
+    Write-Host ("summary : " + $spike.summary)
+    Write-Host ("verified: " + $spike.verified)
+    Write-Host ("rate_limited_total: " + $spike.stats.rate_limited_total)
+    Write-Host ("citations: " + $spikeCitations)
+
+    Show 'Invoke-RestMethod POST /api/advisor/analyze {"question":"Why were there 503s?"}'
+    $unsupported = Invoke-RestMethod -Method Post -Uri $analyze -Headers $headers -ContentType 'application/json' -Body '{"question":"Why were there 503s?"}'
+    Write-Host ("summary : " + $unsupported.summary)
+    Write-Host ("verified: " + $unsupported.verified)
+    Write-Host ("citations: " + $unsupported.citations.Count)
+    Write-Host ("last tool: " + $unsupported.tool_trace[-1].tool)
+
+    Show 'Invoke-RestMethod GET /api/advisor/stats/requests_total'
+    $endpoint = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/advisor/stats/requests_total' -Headers $headers
+    Write-Host ("stats endpoint: " + ($endpoint | ConvertTo-Json -Compress))
+
+    $ok = $testsOk -and $overview.verified -and $spike.verified `
+      -and ($unsupported.summary -eq 'No verified data') `
+      -and ($unsupported.verified -eq $false) `
+      -and ($unsupported.citations.Count -eq 0) `
+      -and ($overview.tool_trace[-1].tool -eq 'verify_answer') `
+      -and ($endpoint.requests_total -gt 0)
+    Finish $ok
+  }
+
   default {
     Write-Host "unknown evidence id $Id" -ForegroundColor Red
     Finish $false

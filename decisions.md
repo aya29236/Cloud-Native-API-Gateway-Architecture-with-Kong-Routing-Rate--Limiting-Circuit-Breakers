@@ -65,3 +65,7 @@
 ## DEC-016 — Layer 5 / M5 verified analyzer
 - Status: Applied after explicit A/B/C approval for the next implementation step
 - Decision: The V3.1 stub is replaced by `advisor/app/analyzer.py`, a deterministic tool loop (`read_logs`, `filter_records`, `aggregate`, `verify_answer`) that answers only from C2-valid records in the read-only Kong log mount. Citations `[L<id>]` and every summary number are checked against the records loaded for that request; any unsupported result returns the exact C1 fallback `"No verified data"` with `verified=false`. No external LLM or network call is introduced. `/stats` and `/stats/<name>` now expose the same verified aggregate, and Compose sets `ADVISOR_LOG_PATH=/var/log/kong/access.json` on both replicas.
+
+## DEC-017 — Layer 5 terminal evidence 22
+- Status: Applied after explicit A/B/C approval for the M5 evidence step
+- Decision: Evidence `screenshots/22_layer5_verified_analyzer.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 22` branch in `scripts/terminal-evidence-run.ps1`. The window shows the 14-test Advisor suite, a verified overview, a verified 429 answer with `[L…]` citations, the exact 503 `"No verified data"` fallback, and the live `/stats` endpoint through Kong. The capture returned `RESULT: PASS`.

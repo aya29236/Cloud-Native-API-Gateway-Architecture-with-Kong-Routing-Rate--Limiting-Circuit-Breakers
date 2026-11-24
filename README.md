@@ -132,6 +132,9 @@ curl.exe -s -X POST http://127.0.0.1:8000/api/advisor/analyze `
   -H "apikey: premium-demo-key" -H "Content-Type: application/json" `
   --data '{"question":"How many requests were logged?"}'
 curl.exe -s http://127.0.0.1:8000/api/advisor/stats -H "apikey: premium-demo-key"
+
+# Formal evidence 22 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '22' -Output 'screenshots\22_layer5_verified_analyzer.png'
 ```
 
 The response carries the five frozen C1 fields plus a `tool_trace` that names each tool, its arguments and its result. No raw Kong headers or credentials are copied into the trace.
@@ -215,6 +218,7 @@ Evidence (real screenshots of the PowerShell terminal window, captured by `scrip
 | 19 | `screenshots/19_layer2_auth_matrix.png` | PNG | repo `screenshots/` | live key-auth/JWT matrix + merged plugin inventory on Accounts/Payments/Advisor |
 | 20 | `screenshots/20_layer2_rate_token_tls.png` | PNG | repo `screenshots/` | live G3 tiered limits, G4 token-bucket parity and G5 HTTPS/SAN checks |
 | 21 | `screenshots/21_layer2_telemetry.png` | PNG | repo `screenshots/` | `kong_*` metrics on :8100 plus a C2 0.1.1 `file-log` field check |
+| 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 14 Advisor tests green, verified overview and 429 answer with citations, exact 503 fallback, and `/stats` through Kong |
 
 Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG is a direct screenshot of a visible PowerShell window running the live commands; regenerate one with:
 
