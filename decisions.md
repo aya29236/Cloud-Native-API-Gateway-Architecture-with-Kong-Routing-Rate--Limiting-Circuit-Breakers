@@ -82,7 +82,7 @@
 
 ## DEC-020 — Final Gate audit
 - Status: Applied after explicit A/B/C approval for the Final Gate audit
-- Decision: `scripts/final_gate_audit.py` is the reproducible stdlib-only Final Gate audit. Its current result is `PASS WITH WARNINGS`: 53/53 automated checks pass across C1–C4 contracts, Kong topology/healthchecks, live C1 auth/headers, live C2 log fields, C3 Prometheus/Alertmanager/n8n, C4 Compose/load generators, Layer 5 analyzer, evidence files, CI structure and branch invariants.
+- Decision: `scripts/final_gate_audit.py` is the reproducible stdlib-only Final Gate audit. Its current result is `PASS WITH WARNINGS`: 54/54 automated checks pass across C1–C4 contracts, Kong topology/healthchecks, live C1 auth/headers, live C2 log fields, C3 Prometheus/Alertmanager/n8n, C4 Compose/load generators, Layer 5 analyzer, evidence files, CI structure and branch invariants.
 - Decision: The audit intentionally reports open items as WARN rather than marking them complete: owner evidence IDs `10`, `11`, `13`, `14`; the Gate 0 checkbox for the LLM tool-calling spike; absent Telegram credentials; and the inability to re-read `main` branch protection without an authenticated GitHub token. The professor-questions checkbox was subsequently confirmed sent by A/B/C and is now checked.
 - Decision: Evidence `screenshots/25_final_gate_audit.png` is a direct screenshot of a visible PowerShell window running that audit. The capture returned `RESULT: PASS`.
 
@@ -95,4 +95,11 @@
 - Decision: The professor's énoncé requires an overview of Kong DB-less declarative mode versus PostgreSQL mode, not a practical DB-mode lab. A/B/C chose "no lab; add theory only".
 - Decision: `README.md` now contains a paste-ready "Kong deployment modes — theory overview" section with a mode comparison, bootstrap commands, Admin API read/write distinction, and the teaching point that Git-owned YAML is the source of truth in DB-less mode while PostgreSQL and migrations are the source of truth in DB mode. No `docker-compose.dbmode.yml` is created or claimed.
 - Decision: C4 is bumped by an editorial PATCH from `0.2.0` to `0.2.1` to remove the unimplemented `dbmode_lab` promise and record the theory-only scope. No names, ports, profiles, service behaviour or evidence semantics change. The CI expected contract string and `contracts/README.md` table are updated with it.
-- Decision: Evidence `screenshots/25_final_gate_audit.png` is recaptured after the audit gains the DB-less-vs-Postgres theory check; the audit remains `PASS WITH WARNINGS` with 53/53 automated checks.
+- Decision: Evidence `screenshots/25_final_gate_audit.png` is recaptured after the audit gains the DB-less-vs-Postgres theory check; the audit remains `PASS WITH WARNINGS` with 54/54 automated checks.
+
+## DEC-023 — Presentation first, Ollama approved in principle
+- Status: Approved by A Eya Derouiche, B Aya Fayachi and C Wafe Bziouiche
+- Decision: Real AI with Ollama is approved in principle, but implementation is deferred until after the presentation and demo. The user will provide the Ollama runtime details later.
+- Decision: `presentation/FinTech_API_Gateway.pptx` is the 24-slide English theoretical + practical deck. It covers all mandatory professor topics, both custom diagrams, the comparison matrix, Steps 1-4, evidence gallery, Final Gate result and the Ollama roadmap.
+- Decision: `presentation/slides.md` is the reviewable source outline and `scripts/build_presentation.py` is the reproducible stdlib OOXML builder. The generated PPTX was validated by XML parsing and by opening it in PowerPoint 2013 with 24 slides.
+- Decision: The demo recording is owned by the students; no video is generated or committed by this workflow.

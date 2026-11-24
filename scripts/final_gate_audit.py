@@ -252,6 +252,15 @@ def check_evidence() -> None:
     required_rows = ("01_", "02_", "03_", "18_", "19_", "20_", "21_", "22_", "23_", "24_")
     add(gate, "README evidence rows", all(name in readme for name in required_rows))
     add(gate, "decisions log", "DEC-019" in text("decisions.md"))
+    deck = ROOT / "presentation" / "FinTech_API_Gateway.pptx"
+    add(
+        gate,
+        "presentation artifacts",
+        deck.is_file()
+        and deck.read_bytes()[:2] == b"PK"
+        and (ROOT / "presentation" / "slides.md").is_file()
+        and (ROOT / "scripts" / "build_presentation.py").is_file(),
+    )
     tracked = subprocess.run(
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     ).stdout.splitlines()

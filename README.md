@@ -72,6 +72,14 @@ curl -i -X POST http://127.0.0.1:8001/services \
 
 The teaching point: DB-less Kong treats `kong.yml` as immutable desired state, while PostgreSQL-mode Kong treats the Admin API and the database as live mutable state. Both expose the same proxy/plugin model; they differ in how configuration is stored, changed and operated.
 
+## Presentation
+
+The theoretical + practical PowerPoint deck is `presentation/FinTech_API_Gateway.pptx` (24 slides, English). It covers the professor's mandatory definitions, Kong entities, plugin phases, rate-limiting algorithms, active/passive health checks, two custom diagrams, DB-less vs PostgreSQL theory, the comparison matrix, Steps 1–4, evidence gallery, Final Gate result and the approved Ollama roadmap.
+
+- Source outline: `presentation/slides.md`
+- Reproducible builder: `python scripts/build_presentation.py` (stdlib OOXML, no third-party library)
+- The demo recording is owned by the students; no demo video is generated in this repository.
+
 ## Gate 0 status
 - [x] Initial repository layout
 - [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3 v0.2.1, C4 v0.2.1)
@@ -443,7 +451,7 @@ Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`
 
 ## Final Gate audit
 
-`scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 53/53 automated checks pass, while the script deliberately reports these open items instead of hiding them:
+`scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 54/54 automated checks pass, while the script deliberately reports these open items instead of hiding them:
 
 - Owner evidence IDs `10`, `11`, `13` and `14` are not present in `screenshots/`; `14` remains blocked on Telegram test credentials.
 - Gate 0 still has one unchecked question: the LLM tool-calling spike completed by all three students. The professor-questions item is now confirmed sent by A/B/C.
