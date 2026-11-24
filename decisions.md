@@ -36,4 +36,4 @@
 
 ## DEC-009 — Real CI pipeline before Layer 2
 - Status: Applied on the requested `ci/prototype-pipeline` branch
-- Decision: Replace the Gate 0 CI skeleton with three real jobs (P3a repository checks, P3b pytest/Kong/plugin mocks, P3c amtool/promtool/verifier/image builds) plus one aggregate green gate. The fragment merger is rewritten with the Python standard library so CI does not depend on PyYAML, which the project owner explicitly rejected. The pipeline runs on every push, pull request and manual dispatch; branch protection and evidence 18 are configured/captured separately after the first run.
+- Decision: Replace the Gate 0 CI skeleton with three real jobs (P3a repository checks, P3b pytest/Kong/plugin mocks, P3c amtool/promtool/verifier/image builds) plus one aggregate green gate. The fragment merger is rewritten with the Python standard library so CI does not depend on PyYAML, which the project owner explicitly rejected. The pipeline runs on every push, pull request and manual dispatch. Evidence 18 was captured from real Actions runs #9 (red: broken `kong.yml`) and #10 (green: restored `kong.yml`); branch protection is still to be configured on GitHub.

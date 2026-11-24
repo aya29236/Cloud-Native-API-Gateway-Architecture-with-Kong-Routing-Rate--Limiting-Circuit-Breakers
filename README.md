@@ -56,6 +56,17 @@ docker compose --profile core down
 
 The fragment merger in `scripts/fragment_lab.py` is stdlib-only; no PyYAML is used.
 
+### CI red/green evidence (18)
+
+Evidence `screenshots/18_ci_red_green.png` records the real Actions behaviour:
+
+1. Run #9 (`817e044`) intentionally set `_format_version: "9.9"` in `kong/kong.yml`.
+   P3a failed at `Parse live declarative Kong config with Kong 3.9.1`, and the aggregate
+   `CI green gate` failed. P3b and P3c still passed, showing the guard is specific.
+2. Run #10 (`1ad4904`) restored `_format_version: "3.0"`. All four jobs passed again.
+
+No branch was merged into `main`; the verification stayed on `ci/prototype-pipeline`.
+
 ## Accounts service — Student B (V1)
 
 Local development (PostgreSQL 16 runs in Docker, Django runs on the host):
