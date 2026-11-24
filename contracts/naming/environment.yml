@@ -1,0 +1,108 @@
+contract_version: 0.2.0
+status: approved
+frozen: true
+approved_by:
+  - Student A - Eya Derouiche
+  - Student B - Aya Fayachi
+  - Student C - Wafe Bziouiche
+source: Master Plan v5 section 2.1 (C4), component table, P1, K8s work package
+
+version_history:
+  - "0.1.0: initial draft with Kong, service replicas, ports and profiles."
+  - "0.2.0: added PostgreSQL 16, the mock upstream, Locust/k6, monitoring,
+    automation, AI runtime and DB-mode lab names; promoted to approved."
+
+project: fintech-api-gateway
+compose_project_name: fintech-api-gateway
+
+kong:
+  image_variable: KONG_IMAGE
+  image_default: kong:3.9.1
+  mode: dbless
+  declarative_config: kong/kong.yml
+  container_name: kong
+  proxy_http_host_port: 8000
+  proxy_https_host_port: 8443
+  admin_host_bind: 127.0.0.1
+  admin_host_port: 8001
+  status_container_port: 8100
+
+containers:
+  gateway:
+    kong: [kong]
+  application_services:
+    accounts: [accounts-1, accounts-2]
+    payments: [payments-1, payments-2]
+    advisor: [advisor-1, advisor-2]
+  database:
+    postgres: [postgres]
+  gate_0_mock:
+    mock-upstream: [mock-upstream]
+  monitoring:
+    prometheus: [prometheus]
+    alertmanager: [alertmanager]
+    grafana: [grafana]
+  automation:
+    n8n: [n8n]
+  ai_runtime:
+    ollama: [ollama]
+  load_testing:
+    locust: [locust]
+    k6: [k6]
+
+images:
+  postgres: postgres:16
+  prometheus: prom/prometheus
+  alertmanager: prom/alertmanager
+  grafana: grafana/grafana
+  n8n: n8nio/n8n
+  ollama: ollama/ollama
+  mock-upstream: built from ./mock-upstream
+  k6: grafana/k6
+
+ports:
+  accounts_internal: 8000
+  payments_internal: 8000
+  advisor_internal: 8000
+  mock_internal: 8080
+  postgres_internal: 5432
+  kong_proxy_http_host: 8000
+  kong_proxy_https_host: 8443
+  kong_admin_host: 8001
+  kong_status_container: 8100
+  prometheus_host: 9090
+  alertmanager_host: 9093
+  grafana_host: 3000
+  n8n_host: 5678
+  ollama_host: 11434
+  locust_host: 8089
+  k6_host: none
+
+networks: [gateway]
+network_name: fintech-gateway
+volumes: [kong-logs, postgres-data]
+compose_profiles: [core, monitoring, ai, load]
+compose_files:
+  main: docker-compose.yml
+  dbmode_lab: docker-compose.dbmode.yml
+  dbmode_note: Separate Kong + PostgreSQL mode lab on non-conflicting ports.
+
+environment_variables:
+  - KONG_IMAGE
+  - KONG_PROXY_PORT
+  - KONG_HTTPS_PORT
+  - KONG_ADMIN_PORT
+  - KONG_STATUS_PORT
+  - POSTGRES_DB
+  - POSTGRES_USER
+  - POSTGRES_PASSWORD
+  - DATABASE_URL
+  - ALERTMANAGER_WEBHOOK_URL
+  - N8N_WEBHOOK_URL
+  - OLLAMA_HOST
+  - OLLAMA_MODEL
+
+kubernetes:
+  cluster: minikube
+  controller: kong-ingress-controller
+  note: Same 401/200/429 demo through the ingress at the final gate.

@@ -1,0 +1,2 @@
+# Lab/verification tools (not service runtime dependencies).
+PyJWT==2.15.1

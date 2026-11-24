@@ -1,80 +1,766 @@
 openapi: 3.1.0
 info:
-  title: FinTech Gateway Service Contracts
-  version: 0.1.0
-  description: Draft contract pack for Gate 0; review and approve before implementation.
+  title: FinTech Gateway Service Contracts (C1)
+  version: 0.3.0
+  description: |
+    C1 API contract for the FinTech API Gateway project.
+
+    Status: APPROVED by Student A (Eya Derouiche), Student B (Aya Fayachi)
+    and Student C (Wafe Bziouiche). Frozen at Gate 0.
+
+    Version history:
+    - 0.2.1: corrected the Student C availability statement.
+    - 0.3.0: aligned with the exact Master Plan v5 C1 requirements;
+      added approval status, all required headers on every operation,
+      service resource schemas and health endpoints; promoted to approved.
+
+    Master Plan v5 section 2.1 requires, for each service: method, path,
+    status codes, auth, the headers X-Served-By, Kong-Request-ID and
+    X-Consumer-Username, internal port 8000 and a /health response.
+    The advisor contract requires POST /analyze with request {question}
+    and response {summary, stats, citations, tool_trace, verified}.
+
+    Kong routes are /api/accounts, /api/payments and /api/advisor with
+    strip_path enabled. Public traffic enters on HTTP 8000 or HTTPS 8443
+    (TLS terminated at Kong). Kong strips the service prefix before
+    forwarding. All three upstream services listen on internal port 8000.
+    Each service has two replicas: accounts-1/2, payments-1/2, advisor-1/2.
+
+    Authentication is key-auth with the apikey header on Accounts and
+    Advisor, and JWT bearer (HS256) on Payments. The demo consumers are
+    fintech-free and fintech-premium with both credential types; the JWT
+    key must match the iss claim.
+
+    Concrete project decisions based on the broad Master Plan: the
+    Accounts and Payments resource fields, the retrieve-by-id paths, the
+    Advisor /stats/* paths and the tiered rate-limit values in C3.
+
 servers:
   - url: http://localhost:8000
+    description: Public Kong HTTP proxy
+  - url: https://localhost:8443
+    description: Public Kong HTTPS proxy (TLS terminated at Kong)
+  - url: http://accounts:8000
+    description: Internal Accounts service (direct, no Kong policies)
+  - url: http://payments:8000
+    description: Internal Payments service (direct, no Kong policies)
+  - url: http://advisor:8000
+    description: Internal Advisor service (direct, no Kong policies)
+
+tags:
+  - name: Accounts
+    description: Django REST Accounts service behind Kong key-auth.
+  - name: Payments
+    description: Django REST Payments service behind Kong JWT and token bucket.
+  - name: Advisor
+    description: FastAPI AI Advisor behind Kong key-auth.
+
 paths:
-  /accounts/health:
+  /api/accounts:
     get:
-      operationId: accountsHealth
+      tags: [Accounts]
+      summary: List accounts
+      operationId: listAccounts
+      security:
+        - KeyAuth: []
       responses:
         "200":
-          description: Service health
+          description: Accounts collection
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
-  /payments/health:
-    get:
-      operationId: paymentsHealth
-      responses:
-        "200":
-          description: Service health
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Health"
-  /advisor/health:
-    get:
-      operationId: advisorHealth
-      responses:
-        "200":
-          description: Service health
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Health"
-  /advisor/analyze:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
     post:
-      operationId: analyzeLogs
-      description: Analyzer answers only from verified Kong log tool results.
+      tags: [Accounts]
+      summary: Create an account
+      operationId: createAccount
+      security:
+        - KeyAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [question]
-              properties:
-                question:
-                  type: string
-                  minLength: 1
+              $ref: "#/components/schemas/AccountCreate"
+      responses:
+        "201":
+          description: Account created
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/accounts/{account_id}:
+    get:
+      tags: [Accounts]
+      summary: Retrieve an account
+      operationId: getAccount
+      security:
+        - KeyAuth: []
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: integer
       responses:
         "200":
-          description: Analysis result
+          description: Requested account
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/accounts/health:
+    get:
+      tags: [Accounts]
+      summary: Accounts health check (also used by Kong active health checks)
+      operationId: accountsHealth
+      security:
+        - KeyAuth: []
+      responses:
+        "200":
+          description: Accounts service is healthy
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/accounts/fail:
+    get:
+      tags: [Accounts]
+      summary: Controlled failure endpoint (returns HTTP 500)
+      description: Used by the passive health-check and circuit-breaker tests.
+      operationId: accountsFail
+      security:
+        - KeyAuth: []
+      responses:
+        "500":
+          description: Deliberately generated upstream failure
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/accounts/slow:
+    get:
+      tags: [Accounts]
+      summary: Delayed response endpoint
+      description: Used to test latency, timeouts and resilience behavior.
+      operationId: accountsSlow
+      security:
+        - KeyAuth: []
+      responses:
+        "200":
+          description: Delayed successful response
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DelayResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/accounts/flaky:
+    get:
+      tags: [Accounts]
+      summary: Intermittent failure endpoint
+      description: Randomly returns HTTP 200 or HTTP 500.
+      operationId: accountsFlaky
+      security:
+        - KeyAuth: []
+      responses:
+        "200":
+          description: Successful attempt
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
           content:
             application/json:
               schema:
                 type: object
-                required: [summary, stats, citations, tool_trace, verified]
-                properties:
-                  summary: { type: string }
-                  stats: { type: object, additionalProperties: true }
-                  citations:
-                    type: array
-                    items: { type: string }
-                  tool_trace:
-                    type: array
-                    items: { type: object, additionalProperties: true }
-                  verified: { type: boolean }
+                additionalProperties: true
+        "500":
+          $ref: "#/components/responses/UpstreamFailure"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/payments:
+    get:
+      tags: [Payments]
+      summary: List payments
+      operationId: listPayments
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Payments collection
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Payment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    post:
+      tags: [Payments]
+      summary: Create a payment
+      description: The service stores the X-Consumer-Username header sent by Kong.
+      operationId: createPayment
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCreate"
+      responses:
+        "201":
+          description: Payment created
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/payments/{payment_id}:
+    get:
+      tags: [Payments]
+      summary: Retrieve a payment
+      operationId: getPayment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Requested payment
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/payments/health:
+    get:
+      tags: [Payments]
+      summary: Payments health check (also used by Kong active health checks)
+      operationId: paymentsHealth
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Payments service is healthy
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/advisor/health:
+    get:
+      tags: [Advisor]
+      summary: Advisor health check (also used by Kong active health checks)
+      operationId: advisorHealth
+      security:
+        - KeyAuth: []
+      responses:
+        "200":
+          description: Advisor service is healthy
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/advisor/analyze:
+    post:
+      tags: [Advisor]
+      summary: Analyze Kong gateway logs
+      description: |
+        The advisor answers only from verified tool results. Citations use
+        the form [L<id>]. If no verified data exists, summary must be
+        exactly "No verified data" and verified must be false.
+      operationId: analyzeLogs
+      security:
+        - KeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyzeRequest"
+      responses:
+        "200":
+          description: Analysis result
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyzeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/advisor/stats:
+    get:
+      tags: [Advisor]
+      summary: Advisor statistics overview
+      description: Concrete project endpoint under the Master Plan /stats/* contract.
+      operationId: advisorStats
+      security:
+        - KeyAuth: []
+      responses:
+        "200":
+          description: Statistics overview
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/advisor/stats/{stat_name}:
+    get:
+      tags: [Advisor]
+      summary: Retrieve a named statistic
+      operationId: advisorNamedStat
+      security:
+        - KeyAuth: []
+      parameters:
+        - name: stat_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Requested statistic
+          headers:
+            X-Served-By:
+              $ref: "#/components/headers/ServedBy"
+            Kong-Request-ID:
+              $ref: "#/components/headers/KongRequestId"
+            X-Consumer-Username:
+              $ref: "#/components/headers/ConsumerUsername"
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
 components:
+  securitySchemes:
+    KeyAuth:
+      type: apiKey
+      in: header
+      name: apikey
+      description: |
+        Kong key-auth on Accounts and Advisor. Demo consumers fintech-free
+        and fintech-premium each have an apikey credential. Missing or
+        invalid key returns HTTP 401.
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Kong jwt plugin on Payments. HS256 signed token whose key matches
+        the iss claim. Missing, invalid or wrong-issuer token returns 401.
+
+  headers:
+    ServedBy:
+      description: Identifier of the upstream replica that served the request (container hostname).
+      schema:
+        type: string
+      example: accounts-1
+    KongRequestId:
+      description: Gateway correlation identifier, echoed downstream and logged by Kong and the services.
+      schema:
+        type: string
+    ConsumerUsername:
+      description: Authenticated Kong consumer username, forwarded to and stored by the services.
+      schema:
+        type: string
+      example: fintech-premium
+    RateLimitLimit:
+      description: Configured request allowance for the authenticated consumer.
+      schema:
+        type: integer
+    RateLimitRemaining:
+      description: Remaining requests in the current window.
+      schema:
+        type: integer
+    RateLimitReset:
+      description: Seconds until the rate-limit window resets.
+      schema:
+        type: integer
+    RetryAfter:
+      description: Suggested number of seconds before retrying.
+      schema:
+        type: integer
+
   schemas:
-    Health:
+    HealthResponse:
       type: object
-      required: [status]
       properties:
         status:
           type: string
           enum: [healthy, degraded]
+      required: [status]
+      additionalProperties: false
+
+    DelayResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          examples: [slow_response]
+        delay_seconds:
+          type: number
+      required: [status]
+      additionalProperties: true
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+        owner:
+          type: string
+        balance:
+          type: number
+        currency:
+          type: string
+          examples: [TND]
+        created_at:
+          type: string
+          format: date-time
+      required: [id, owner, balance, currency]
+      additionalProperties: false
+
+    AccountCreate:
+      type: object
+      properties:
+        owner:
+          type: string
+          minLength: 1
+        balance:
+          type: number
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+      required: [owner, balance, currency]
+      additionalProperties: false
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: integer
+        account_id:
+          type: integer
+        amount:
+          type: number
+        currency:
+          type: string
+          examples: [TND]
+        status:
+          type: string
+          enum: [pending, completed, failed]
+        consumer:
+          type: string
+          description: Value of the X-Consumer-Username header sent by Kong.
+        created_at:
+          type: string
+          format: date-time
+      required: [id, account_id, amount, currency, status, consumer]
+      additionalProperties: false
+
+    PaymentCreate:
+      type: object
+      properties:
+        account_id:
+          type: integer
+        amount:
+          type: number
+          exclusiveMinimum: 0
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+      required: [account_id, amount, currency]
+      additionalProperties: false
+
+    AnalyzeRequest:
+      type: object
+      properties:
+        question:
+          type: string
+          minLength: 1
+      required: [question]
+      additionalProperties: false
+
+    AnalyzeResponse:
+      type: object
+      description: |
+        Requires all five fields from Master Plan 2.1. Citations are
+        [L<id>] references into the Kong access-log fixture. When the
+        verifier finds no supported answer, summary is exactly
+        "No verified data" and verified is false.
+      properties:
+        summary:
+          type: string
+        stats:
+          type: object
+          additionalProperties: true
+        citations:
+          type: array
+          items:
+            type: string
+            pattern: "^\\[L[0-9]+\\]$"
+        tool_trace:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        verified:
+          type: boolean
+      required:
+        - summary
+        - stats
+        - citations
+        - tool_trace
+        - verified
+      additionalProperties: false
+
+  responses:
+    BadRequest:
+      description: Invalid request body or parameters.
+    Unauthorized:
+      description: Authentication failed or credentials are missing (HTTP 401).
+      headers:
+        Kong-Request-ID:
+          $ref: "#/components/headers/KongRequestId"
+    RateLimited:
+      description: Request rejected by a tiered rate-limit or token-bucket policy (HTTP 429).
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+        X-RateLimit-Limit:
+          $ref: "#/components/headers/RateLimitLimit"
+        X-RateLimit-Remaining:
+          $ref: "#/components/headers/RateLimitRemaining"
+        X-RateLimit-Reset:
+          $ref: "#/components/headers/RateLimitReset"
+    PayloadTooLarge:
+      description: Request body exceeds the configured maximum size (HTTP 413).
+    NotFound:
+      description: Requested resource does not exist (HTTP 404).
+      headers:
+        X-Served-By:
+          $ref: "#/components/headers/ServedBy"
+        Kong-Request-ID:
+          $ref: "#/components/headers/KongRequestId"
+    UpstreamFailure:
+      description: Deliberately generated intermittent upstream failure (HTTP 500).
+      headers:
+        X-Served-By:
+          $ref: "#/components/headers/ServedBy"
+        Kong-Request-ID:
+          $ref: "#/components/headers/KongRequestId"
+        X-Consumer-Username:
+          $ref: "#/components/headers/ConsumerUsername"
+    Unavailable:
+      description: No healthy upstream target is available; circuit open (HTTP 503).

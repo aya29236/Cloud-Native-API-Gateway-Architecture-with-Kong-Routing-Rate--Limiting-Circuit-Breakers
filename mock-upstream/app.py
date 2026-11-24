@@ -42,7 +42,10 @@ class Handler(BaseHTTPRequestHandler):
             "received": payload,
             "headers": {
                 "content_type": self.headers.get("Content-Type"),
-                "kong_request_id": self.headers.get("Kong-Request-ID")
+                "kong_request_id": self.headers.get("Kong-Request-ID"),
+                # G6 verifies request-transformer with these two echo fields.
+                "x_gateway": self.headers.get("X-Gateway"),
+                "x_debug": self.headers.get("X-Debug")
             }
         })
 

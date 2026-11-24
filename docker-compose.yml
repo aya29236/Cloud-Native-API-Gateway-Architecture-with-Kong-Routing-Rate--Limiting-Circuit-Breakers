@@ -1,5 +1,51 @@
 name: fintech-api-gateway
 
+# Shared settings for the Accounts replicas and the one-shot migration job.
+x-accounts-common: &accounts-common
+  build:
+    context: ./services/accounts
+  image: fintech-accounts:dev
+  environment:
+    POSTGRES_DB: ${POSTGRES_DB:-accounts}
+    POSTGRES_USER: ${POSTGRES_USER:-accounts}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounts_dev}
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    ACCOUNTS_ALLOWED_HOSTS: "*"
+    ACCOUNTS_SLOW_SECONDS: ${ACCOUNTS_SLOW_SECONDS:-2}
+    ACCOUNTS_FLAKY_FAILURE_RATE: ${ACCOUNTS_FLAKY_FAILURE_RATE:-0.5}
+  networks:
+    - gateway
+  profiles: ["core"]
+
+# Shared settings for the Payments replicas and their migration job.
+x-payments-common: &payments-common
+  build:
+    context: ./services/payments
+  image: fintech-payments:dev
+  environment:
+    POSTGRES_DB: ${POSTGRES_DB:-accounts}
+    POSTGRES_USER: ${POSTGRES_USER:-accounts}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounts_dev}
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
+    PAYMENTS_ALLOWED_HOSTS: "*"
+  networks:
+    - gateway
+  profiles: ["core"]
+
+# Shared settings for the Advisor replicas. The Kong log volume is mounted
+# read-only: C1/C2 give the analyzer read access to gateway logs only.
+x-advisor-common: &advisor-common
+  build:
+    context: ./advisor
+  image: fintech-advisor:dev
+  volumes:
+    - kong-logs:/var/log/kong:ro
+  networks:
+    - gateway
+  profiles: ["core"]
+
 services:
   mock-upstream:
     build:
@@ -19,26 +65,58 @@ services:
       start_period: 5s
     profiles: ["core"]
 
+  # Layer 2/I3: the named log volume is created root-owned; make it writable
+  # by Kong's uid before Kong starts so file-log can write the C2 access log.
+  kong-logs-init:
+    image: ${KONG_IMAGE:-kong:3.9.1}
+    container_name: kong-logs-init
+    user: root
+    command: ["sh", "-c", "chown -R 1001:1001 /var/log/kong && chmod 775 /var/log/kong"]
+    volumes:
+      - kong-logs:/var/log/kong
+    networks:
+      - gateway
+    profiles: ["core"]
+
   kong:
     image: ${KONG_IMAGE:-kong:3.9.1}
     container_name: kong
     depends_on:
+      kong-logs-init:
+        condition: service_completed_successfully
       mock-upstream:
+        condition: service_healthy
+      accounts-1:
+        condition: service_healthy
+      accounts-2:
+        condition: service_healthy
+      payments-1:
+        condition: service_healthy
+      payments-2:
+        condition: service_healthy
+      advisor-1:
+        condition: service_healthy
+      advisor-2:
         condition: service_healthy
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
-      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
       KONG_ADMIN_LISTEN: "0.0.0.0:8001"
       KONG_STATUS_LISTEN: "0.0.0.0:8100"
       KONG_LOG_LEVEL: "notice"
+      # Layer 2/I3: custom Lua token bucket and its shared dictionary.
+      KONG_PLUGINS: "bundled,token-bucket"
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: "token_bucket 1m"
     volumes:
       - ./kong/kong.yml:/etc/kong/kong.yml:ro
+      - ./kong/plugins/token-bucket:/usr/local/share/lua/5.1/kong/plugins/token-bucket:ro
       - kong-logs:/var/log/kong
     ports:
       - "8000:8000"
       - "8443:8443"
       - "127.0.0.1:8001:8001"
+      - "127.0.0.1:8100:8100"
     networks:
       - gateway
     healthcheck:
@@ -49,6 +127,175 @@ services:
       start_period: 20s
     profiles: ["core"]
 
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-accounts}
+      POSTGRES_USER: ${POSTGRES_USER:-accounts}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-accounts_dev}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - gateway
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-accounts} -d ${POSTGRES_DB:-accounts}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    profiles: ["core"]
+
+  # Migrations run once, before either replica starts, so the two replicas
+  # never race to create the same tables.
+  accounts-migrate:
+    <<: *accounts-common
+    container_name: accounts-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    command: ["python", "manage.py", "migrate", "--noinput"]
+
+  accounts-1:
+    <<: *accounts-common
+    container_name: accounts-1
+    hostname: accounts-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      accounts-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  accounts-2:
+    <<: *accounts-common
+    container_name: accounts-2
+    hostname: accounts-2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      accounts-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Payments runs after Accounts migrations because both services share one
+  # PostgreSQL database and therefore one django_migrations table (DEC-008).
+  payments-migrate:
+    <<: *payments-common
+    container_name: payments-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+      accounts-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    command: ["python", "manage.py", "migrate", "--noinput"]
+
+  payments-1:
+    <<: *payments-common
+    container_name: payments-1
+    hostname: payments-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      payments-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  payments-2:
+    <<: *payments-common
+    container_name: payments-2
+    hostname: payments-2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      payments-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  advisor-1:
+    <<: *advisor-common
+    container_name: advisor-1
+    hostname: advisor-1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  advisor-2:
+    <<: *advisor-common
+    container_name: advisor-2
+    hostname: advisor-2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  n8n:
+    image: n8nio/n8n:1.82.0
+    container_name: n8n
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      # M3: workflows call the Advisor through Kong with key-auth, then post
+      # to a channel. TELEGRAM_API_BASE points at a local demo sink by
+      # default; switch it to https://api.telegram.org for real delivery.
+      ADVISOR_URL: http://kong:8000/api/advisor/analyze
+      ADVISOR_APIKEY: ${DEMO_APIKEY:-premium-demo-key}
+      TELEGRAM_API_BASE: http://notify-sink:8080
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-demo-token}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-fintech-alerts}
+    ports:
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    networks:
+      - gateway
+    profiles: ["monitoring"]
+
+  # Demo notification channel: accepts Telegram-style sendMessage calls from
+  # the n8n workflows and prints the payload to stdout for evidence 14.
+  notify-sink:
+    image: python:3.13-slim
+    container_name: notify-sink
+    command: ["python", "-u", "/app/server.py"]
+    volumes:
+      - ./n8n/notify_sink.py:/app/server.py:ro
+    networks:
+      - gateway
+    profiles: ["monitoring"]
+
   # Reserved for later layers. These services are deliberately not enabled in Gate 0.
   prometheus:
     image: prom/prometheus:latest
@@ -56,7 +303,15 @@ services:
     networks: ["gateway"]
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.28.1
+    container_name: alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --web.listen-address=0.0.0.0:9093
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
     profiles: ["monitoring"]
     networks: ["gateway"]
 
@@ -78,3 +333,7 @@ networks:
 volumes:
   kong-logs:
     name: kong-logs
+  postgres-data:
+    name: fintech-postgres-data
+  n8n-data:
+    name: fintech-n8n-data

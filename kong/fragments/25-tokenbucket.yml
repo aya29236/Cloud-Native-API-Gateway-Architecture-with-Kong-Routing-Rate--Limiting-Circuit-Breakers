@@ -1,0 +1,21 @@
+# G4 (Student A) - custom token-bucket plugin (G4, R13, R21).
+# Independent-wave fragment: NOT merged into kong.yml until Layer 2 (I3).
+# Two consumer-scoped instances on Payments: free = capacity 5 @ 1 token/s,
+# premium = capacity 50 @ 10 tokens/s. Consumers are declared in 10-auth.yml.
+# Loaded with KONG_PLUGINS=bundled,token-bucket; state in the shared dict
+# KONG_NGINX_HTTP_LUA_SHARED_DICT="token_bucket 1m"; PRIORITY 750 < auth.
+
+plugins:
+  - name: token-bucket
+    service: payments
+    consumer: fintech-free
+    config:
+      capacity: 5
+      refill_rate: 1
+
+  - name: token-bucket
+    service: payments
+    consumer: fintech-premium
+    config:
+      capacity: 50
+      refill_rate: 10

@@ -1,0 +1,17 @@
+# G7 (Student A) - telemetry plugins (G7, R10).
+# Independent-wave fragment: NOT merged into kong.yml until Layer 2 (I3).
+# Prometheus metrics on :8100/metrics; file-log writes one C2-shaped JSON
+# record per request to /var/log/kong/access.json on the kong-logs volume.
+
+plugins:
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+  - name: file-log
+    config:
+      path: /var/log/kong/access.json
+      reopen: true

@@ -1,0 +1,44 @@
+# G2 (Student A) - JWT / key-auth (G2, R31, R36).
+# Independent-wave fragment: NOT merged into kong.yml until Layer 2 (I3).
+# key-auth on Accounts/Advisor (header `apikey`); JWT (HS256) on Payments.
+# The JWT `key` MUST equal the `iss` claim, as required by the master plan.
+# All values below are demo credentials only.
+
+consumers:
+  - username: fintech-free
+    keyauth_credentials:
+      - key: free-demo-key
+    jwt_secrets:
+      - key: fintech-free
+        secret: free-jwt-secret
+        algorithm: HS256
+
+  - username: fintech-premium
+    keyauth_credentials:
+      - key: premium-demo-key
+    jwt_secrets:
+      - key: fintech-premium
+        secret: premium-jwt-secret
+        algorithm: HS256
+
+plugins:
+  - name: key-auth
+    service: accounts
+    config:
+      key_names:
+        - apikey
+      hide_credentials: false
+
+  - name: key-auth
+    service: advisor
+    config:
+      key_names:
+        - apikey
+      hide_credentials: false
+
+  - name: jwt
+    service: payments
+    config:
+      key_claim_name: iss
+      secret_is_base64: false
+      run_on_preflight: false
