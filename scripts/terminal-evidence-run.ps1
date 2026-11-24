@@ -422,6 +422,14 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
     Finish $ok
   }
 
+  '25' {
+    Show 'python scripts/final_gate_audit.py'
+    $audit = python scripts/final_gate_audit.py 2>&1
+    $audit | ForEach-Object { Write-Host $_ }
+    $ok = ($audit -join "`n") -match 'FINAL GATE RESULT: PASS( WITH WARNINGS)?'
+    Finish $ok
+  }
+
   default {
     Write-Host "unknown evidence id $Id" -ForegroundColor Red
     Finish $false

@@ -248,6 +248,7 @@ Evidence (real screenshots of the PowerShell terminal window, captured by `scrip
 | 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 15 Advisor tests green, verified overview, 429 answer with citations, grounded client-IP stats, exact 503 fallback, and `/stats` through Kong |
 | 23 | `screenshots/23_layer4_prometheus_m1.png` | PNG | repo `screenshots/` | M1 contract check PASS, promtool config/rules SUCCESS, Kong target up, 3 rules loaded, Alertmanager connected |
 | 24 | `screenshots/24_layer3_chaos_failover.png` | PNG | repo `screenshots/` | active/passive healthchecks, k6 load with `accounts-2` offline, UNHEALTHY → HEALTHY recovery, 0% failures, Locust cross-check |
+| 25 | `screenshots/25_final_gate_audit.png` | PNG | repo `screenshots/` | `scripts/final_gate_audit.py` PASS on all 52 automated checks, with explicit WARN items |
 
 Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG is a direct screenshot of a visible PowerShell window running the live commands; regenerate one with:
 
@@ -397,6 +398,21 @@ python scripts/verify_metrics_contract.py
 ```
 
 Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`.
+
+## Final Gate audit
+
+`scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 52/52 automated checks pass, while the script deliberately reports these open items instead of hiding them:
+
+- Owner evidence IDs `10`, `11`, `13` and `14` are not present in `screenshots/`; `14` remains blocked on Telegram test credentials.
+- Gate 0 still has two unchecked questions: the LLM tool-calling spike completed by all three students, and open questions sent to the professor.
+- No authenticated GitHub token was available to re-read `main` branch protection; the earlier applied protection is unchanged but not re-verified in this run.
+
+```powershell
+python scripts/final_gate_audit.py
+
+# Formal evidence 25 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '25' -Output 'screenshots\25_final_gate_audit.png'
+```
 
 ## Contract change rule
 Contracts are versioned independently. Any breaking change requires a MAJOR version bump and approval from A, B and C. Backward-compatible additions require a MINOR bump. Editorial corrections require a PATCH bump. Record every accepted change in `decisions.md`.
