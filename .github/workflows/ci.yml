@@ -58,7 +58,7 @@ jobs:
         run: python scripts/fragment_lab.py parse
 
       - name: Validate Compose profiles
-        run: docker compose --profile core --profile monitoring config --quiet
+        run: docker compose --profile core --profile monitoring --profile load config --quiet
 
       - name: Check evidence filenames
         run: |
@@ -125,6 +125,11 @@ jobs:
 
       - name: Plugin simulator + offline guard tests
         run: python -m pytest tests/fragments -q
+
+      - name: Validate load generator scripts
+        run: |
+          python -m py_compile tests/load/locustfile.py
+          test -s tests/load/k6_failover.js
 
       - name: Parse every fragment via explicit merge into kong.yml (Kong 3.9.1)
         run: python scripts/verify_fragments.py

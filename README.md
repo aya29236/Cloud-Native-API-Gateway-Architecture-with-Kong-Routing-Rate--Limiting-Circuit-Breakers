@@ -114,13 +114,13 @@ Accounts and Payments share one PostgreSQL 16 database (DEC-008); table names ar
 
 - [x] V3.1 FastAPI shell, `/health`, Pydantic C1 models, stub `/analyze` ("No verified data"), `/stats`, `X-Served-By` (8 tests green)
 - [x] V3.2 `advisor-1`/`advisor-2` containers with read-only `kong-logs` mount (8/8 green inside the container)
-- [x] V3.3 Layer 5 verified tool-calling analyzer: `read_logs` → `filter_records` → `aggregate` → `verify_answer`, with exact C1 fallback when no tool result supports the question
+- [x] V3.3 Layer 5 verified tool-calling analyzer: `read_logs` → `filter_records` → `aggregate` → `verify_answer`, with grounded client-IP/route stats and exact C1 fallback when no tool result supports the question
 
 FastAPI serves Swagger UI at `http://127.0.0.1:8000/docs` once Kong routes `/api/advisor` at Layer 1. Locally: `cd advisor; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload`.
 
 ### Layer 5 / M5 — verified analyzer
 
-`advisor/app/analyzer.py` never invents an answer or calls an external LLM. It reads only the read-only `/var/log/kong/access.json` mount (`ADVISOR_LOG_PATH`), accepts only C2 0.1.1-valid records, and returns citations `[L<id>]` whose ids are checked against the records loaded for that request. Every number in the summary comes from the `aggregate` tool result. If there are no valid records, no matching records, a forged citation, or any other failed check, the response is exactly `summary: "No verified data"`, `verified: false`, `citations: []`.
+`advisor/app/analyzer.py` never invents an answer or calls an external LLM. It reads only the read-only `/var/log/kong/access.json` mount (`ADVISOR_LOG_PATH`), accepts only C2 0.1.1-valid records, and returns citations `[L<id>]` whose ids are checked against the records loaded for that request. Every number in the summary comes from the `aggregate` tool result, including `client_ip_counts`, `distinct_client_ips` and `top_client_ip` for offending-IP/route questions. If there are no valid records, no matching records, a forged citation, or any other failed check, the response is exactly `summary: "No verified data"`, `verified: false`, `citations: []`.
 
 ```powershell
 cd advisor
@@ -128,10 +128,13 @@ cd advisor
 
 # Live through Kong after rebuilding the advisor replicas:
 docker compose --profile core up -d --build advisor-1 advisor-2
-curl.exe -s -X POST http://127.0.0.1:8000/api/advisor/analyze `
-  -H "apikey: premium-demo-key" -H "Content-Type: application/json" `
-  --data '{"question":"How many requests were logged?"}'
-curl.exe -s http://127.0.0.1:8000/api/advisor/stats -H "apikey: premium-demo-key"
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/advisor/analyze `
+  -Headers @{ apikey = 'premium-demo-key' } -ContentType 'application/json' `
+  -Body '{"question":"How many requests were logged?"}'
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/advisor/analyze `
+  -Headers @{ apikey = 'premium-demo-key' } -ContentType 'application/json' `
+  -Body '{"question":"Which client IPs caused errors?"}'
+Invoke-RestMethod http://127.0.0.1:8000/api/advisor/stats -Headers @{ apikey = 'premium-demo-key' }
 
 # Formal evidence 22 (real PowerShell terminal window):
 .\scripts\capture-terminal-evidence.ps1 -Id '22' -Output 'screenshots\22_layer5_verified_analyzer.png'
@@ -207,6 +210,30 @@ curl.exe -s -o NUL -w '%{http_code}' -X DELETE http://127.0.0.1:8001/services/mo
 # expect the two replica hostnames alternating
 ```
 
+## Layer 3 / Step 3 — health checks and chaos failover
+
+- [x] `kong/fragments/60-healthchecks.yml`: active `/health` polling and passive 5xx/tcp/timeout checks on all three upstreams; HTTP 429 is excluded so rate limiting does not mark a target down. Explicitly merged into `kong/kong.yml` and parsed in all eight `verify_fragments.py` scenarios.
+- [x] Real load generators: `tests/load/k6_failover.js` and `tests/load/locustfile.py` under the `load` Compose profile (`grafana/k6:1.8.0`, `locustio/locust:2.47.0`).
+- [x] Live chaos result: with a 2-VU 45-second k6 run, stopping `accounts-2` made `accounts-upstream` report `accounts-2=UNHEALTHY` while `accounts-1=HEALTHY`; restarting it recovered both to `HEALTHY`. k6 recorded `100.00%` successful checks and `0.00%` failed requests. A 10-second Locust run independently recorded `0(0.00%)` failures with both replicas in `X-Served-By`.
+
+```powershell
+# Load the healthchecks into live Kong and verify all explicit merges:
+docker compose --profile core up -d --force-recreate kong
+python scripts/verify_fragments.py
+curl.exe -s http://127.0.0.1:8001/upstreams/accounts-upstream/health
+
+# Concurrent load while one replica is offline:
+docker compose --profile load run --rm k6
+docker compose --profile core stop accounts-2
+docker compose --profile core start accounts-2
+docker compose --profile load run --rm locust `
+  -f /mnt/locust/locustfile.py --headless --host http://kong:8000 `
+  -u 2 -r 1 -t 10s --only-summary
+
+# Formal evidence 24 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '24' -Output 'screenshots\24_layer3_chaos_failover.png'
+```
+
 Evidence (real screenshots of the PowerShell terminal window, captured by `scripts/capture-terminal-evidence.ps1` while the commands run):
 
 | ID | File | Format | Storage | Verification |
@@ -218,8 +245,9 @@ Evidence (real screenshots of the PowerShell terminal window, captured by `scrip
 | 19 | `screenshots/19_layer2_auth_matrix.png` | PNG | repo `screenshots/` | live key-auth/JWT matrix + merged plugin inventory on Accounts/Payments/Advisor |
 | 20 | `screenshots/20_layer2_rate_token_tls.png` | PNG | repo `screenshots/` | live G3 tiered limits, G4 token-bucket parity and G5 HTTPS/SAN checks |
 | 21 | `screenshots/21_layer2_telemetry.png` | PNG | repo `screenshots/` | `kong_*` metrics on :8100 plus a C2 0.1.1 `file-log` field check |
-| 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 14 Advisor tests green, verified overview and 429 answer with citations, exact 503 fallback, and `/stats` through Kong |
+| 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 15 Advisor tests green, verified overview, 429 answer with citations, grounded client-IP stats, exact 503 fallback, and `/stats` through Kong |
 | 23 | `screenshots/23_layer4_prometheus_m1.png` | PNG | repo `screenshots/` | M1 contract check PASS, promtool config/rules SUCCESS, Kong target up, 3 rules loaded, Alertmanager connected |
+| 24 | `screenshots/24_layer3_chaos_failover.png` | PNG | repo `screenshots/` | active/passive healthchecks, k6 load with `accounts-2` offline, UNHEALTHY → HEALTHY recovery, 0% failures, Locust cross-check |
 
 Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG is a direct screenshot of a visible PowerShell window running the live commands; regenerate one with:
 
@@ -231,7 +259,7 @@ Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG 
 
 ## Independent wave — G2–G7 (Students A and C)
 
-No numbered evidence was due for the independent wave; each module's own test was green and the transcript is saved in `tests/fragments/independent-wave-results.txt`. Layer 2 / I3 has now explicitly merged all six fragments into the live `kong/kong.yml`; the fragment files remain the source definitions and the live file is the DB-less source of truth.
+No numbered evidence was due for the independent wave; each module's own test was green and the transcript is saved in `tests/fragments/independent-wave-results.txt`. Layer 2 / I3 explicitly merged all six G2–G7 fragments into the live `kong/kong.yml`; Layer 3 added the seventh `60-healthchecks.yml` fragment. The fragment files remain the source definitions and the live file is the DB-less source of truth.
 
 | WP | Owner | Fragment / script | Mock-upstream result |
 |---|---|---|---|

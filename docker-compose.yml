@@ -339,6 +339,34 @@ services:
     command: ["python", "-c", "print('AI profile placeholder; FastAPI service is added in Layer 1')"]
     networks: ["gateway"]
 
+  # Layer 3 / Step 3: real load generators for the replica-offline chaos test.
+  k6:
+    image: grafana/k6:1.8.0
+    container_name: k6
+    profiles: ["load"]
+    networks: ["gateway"]
+    volumes:
+      - ./tests/load:/scripts:ro
+    environment:
+      BASE_URL: http://kong:8000
+      APIKEY: ${ADVISOR_APIKEY:-premium-demo-key}
+      VUS: "2"
+      DURATION: "45s"
+    command: ["run", "/scripts/k6_failover.js"]
+
+  locust:
+    image: locustio/locust:2.47.0
+    container_name: locust
+    profiles: ["load"]
+    networks: ["gateway"]
+    ports:
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - ./tests/load:/mnt/locust:ro
+    environment:
+      APIKEY: ${ADVISOR_APIKEY:-premium-demo-key}
+    command: ["-f", "/mnt/locust/locustfile.py", "--host", "http://kong:8000"]
+
 networks:
   gateway:
     name: fintech-gateway

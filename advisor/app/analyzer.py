@@ -165,6 +165,7 @@ def read_logs(path: str | Path | None = None) -> tuple[list[LogRecord], dict[str
 def aggregate(records: list[LogRecord]) -> dict[str, Any]:
     """Aggregate only the records passed in by the filter_records tool."""
     status_counts: dict[str, int] = {}
+    client_ip_counts: dict[str, int] = {}
     consumer_counts: dict[str, int] = {}
     route_counts: dict[str, int] = {}
     proxy_values: list[float] = []
@@ -172,6 +173,8 @@ def aggregate(records: list[LogRecord]) -> dict[str, Any]:
     for record in records:
         status_key = str(record.status)
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        if record.client_ip:
+            client_ip_counts[record.client_ip] = client_ip_counts.get(record.client_ip, 0) + 1
         if record.consumer:
             consumer_counts[record.consumer] = consumer_counts.get(record.consumer, 0) + 1
         if record.route:
@@ -180,12 +183,19 @@ def aggregate(records: list[LogRecord]) -> dict[str, Any]:
         if _is_number(proxy):
             proxy_values.append(float(proxy))
 
+    top_client_ip = max(client_ip_counts, key=client_ip_counts.get) if client_ip_counts else ""
+    top_client_ip_requests = client_ip_counts.get(top_client_ip, 0) if top_client_ip else 0
+
     return {
         "requests_total": len(records),
         "errors_total": sum(1 for record in records if record.status >= 400),
         "rate_limited_total": sum(1 for record in records if record.status == 429),
         "server_error_total": sum(1 for record in records if 500 <= record.status < 600),
         "status_counts": dict(sorted(status_counts.items())),
+        "client_ip_counts": dict(sorted(client_ip_counts.items())),
+        "distinct_client_ips": len(client_ip_counts),
+        "top_client_ip": top_client_ip,
+        "top_client_ip_requests": top_client_ip_requests,
         "consumer_counts": dict(sorted(consumer_counts.items())),
         "route_counts": dict(sorted(route_counts.items())),
         "avg_proxy_latency_ms": round(sum(proxy_values) / len(proxy_values), 2)
@@ -220,6 +230,19 @@ def select_records(records: list[LogRecord], question: str) -> Selection:
             "latency",
             "latencies.proxy present, sorted descending",
             timed,
+        )
+
+    if re.search(r"\bip\b|client[_ -]?ip|source ip|offending ip", text):
+        offending = any(token in text for token in ("offending", "error", "fail", "429", "503"))
+        matched = (
+            [record for record in records if record.status >= 400]
+            if offending
+            else list(records)
+        )
+        return Selection(
+            "client_ip",
+            "response.status >= 400" if offending else "all verified C2 records",
+            matched,
         )
 
     if any(token in text for token in ("error", "fail", "4xx", "5xx")):
@@ -270,6 +293,11 @@ def build_summary(selection: Selection, stats: dict[str, Any]) -> str:
         return (
             f"Verified {total} request(s) with recorded proxy latency; "
             f"maximum {stats['max_proxy_latency_ms']} ms."
+        )
+    if selection.intent == "client_ip":
+        return (
+            f"Verified {total} request(s) from {stats['distinct_client_ips']} client IP(s); "
+            f"top IP {stats['top_client_ip']} with {stats['top_client_ip_requests']} request(s)."
         )
     if selection.intent == "errors":
         return f"Verified {total} HTTP error response(s) in the Kong access logs."
@@ -336,7 +364,7 @@ def verify_answer(
         for value in response.stats.values()
         if isinstance(value, int) and not isinstance(value, bool)
     }
-    for key in ("status_counts", "consumer_counts", "route_counts"):
+    for key in ("status_counts", "client_ip_counts", "consumer_counts", "route_counts"):
         nested = response.stats.get(key, {})
         if isinstance(nested, dict):
             stat_numbers.update(str(value) for value in nested.values())

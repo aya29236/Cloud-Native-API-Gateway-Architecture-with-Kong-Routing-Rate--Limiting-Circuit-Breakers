@@ -44,7 +44,7 @@
 
 ## DEC-011 — Explicit fragment merges into kong.yml
 - Status: Applied after the owner's explicit correction
-- Decision: `scripts/fragment_lab.py` accepts no fragment paths and contains no merge logic; it only parses or boots the current `kong/kong.yml`. `scripts/verify_fragments.py` uses stdlib text handling (no PyYAML, no temporary merged config) to write each dependency-aware scenario explicitly into `kong/kong.yml`, parse it with Kong 3.9.1, and restore the previous file. CI runs 7 scenarios; standalone parses of consumer-scoped fragments are intentionally excluded because they require `10-auth.yml`. The live G2–G7 redo used the same explicit-merge helper before every container boot and restored `kong.yml` at the end.
+- Decision: `scripts/fragment_lab.py` accepts no fragment paths and contains no merge logic; it only parses or boots the current `kong/kong.yml`. `scripts/verify_fragments.py` uses stdlib text handling (no PyYAML, no temporary merged config) to write each dependency-aware scenario explicitly into `kong/kong.yml`, parse it with Kong 3.9.1, and restore the previous file. CI runs 8 scenarios after `60-healthchecks.yml` was added; standalone parses of consumer-scoped fragments are intentionally excluded because they require `10-auth.yml`. The live G2–G7 redo used the same explicit-merge helper before every container boot and restored `kong.yml` at the end.
 
 ## DEC-012 — Layer 2 / I3 live fragment integration
 - Status: Applied after explicit A/B/C approval for the next implementation step
@@ -68,8 +68,14 @@
 
 ## DEC-017 — Layer 5 terminal evidence 22
 - Status: Applied after explicit A/B/C approval for the M5 evidence step
-- Decision: Evidence `screenshots/22_layer5_verified_analyzer.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 22` branch in `scripts/terminal-evidence-run.ps1`. The window shows the 14-test Advisor suite, a verified overview, a verified 429 answer with `[L…]` citations, the exact 503 `"No verified data"` fallback, and the live `/stats` endpoint through Kong. The capture returned `RESULT: PASS`.
+- Decision: Evidence `screenshots/22_layer5_verified_analyzer.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 22` branch in `scripts/terminal-evidence-run.ps1`. The window shows the 15-test Advisor suite, a verified overview, a verified 429 answer with `[L…]` citations, grounded client-IP stats, the exact 503 `"No verified data"` fallback, and the live `/stats` endpoint through Kong. The capture was regenerated after the IP-stats change and returned `RESULT: PASS`.
 
 ## DEC-018 — Layer 4 terminal evidence 23
 - Status: Applied after explicit A/B/C approval for the M1 evidence step
 - Decision: Evidence `screenshots/23_layer4_prometheus_m1.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 23` branch in `scripts/terminal-evidence-run.ps1`. The window shows `python scripts/verify_metrics_contract.py` returning `M1 RESULT: PASS`, `promtool check config` and `promtool check rules` SUCCESS lines, the Kong target `up`, 3 loaded rules in `fintech-kong-alerts`, and the active Alertmanager URL. The capture returned `RESULT: PASS`.
+
+## DEC-019 — Layer 3 Step 3 failover and grounded client-IP stats
+- Status: Applied after explicit A/B/C approval for "Implement all gaps"
+- Decision: `kong/fragments/60-healthchecks.yml` adds active `/health` polling and passive 5xx/tcp/timeout checks to all three round-robin upstreams; 429 is excluded so rate limiting alone cannot mark a target unhealthy. The fragment is explicitly merged into `kong/kong.yml` and parsed by all eight `scripts/verify_fragments.py` scenarios. `tests/load/k6_failover.js` and `tests/load/locustfile.py` are real load generators under a new `load` Compose profile (`grafana/k6:1.8.0`, `locustio/locust:2.47.0`).
+- Decision: The analyzer now aggregates `client_ip_counts`, `distinct_client_ips` and `top_client_ip` only from C2-valid records selected by the verified tool loop; the new fields stay inside C1's `stats` object, whose `additionalProperties: true` keeps contract version `0.3.0` frozen.
+- Decision: Evidence `screenshots/24_layer3_chaos_failover.png` is a direct screenshot of a visible PowerShell window. It shows baseline `HEALTHY` targets, a 2-VU 45-second k6 run with `accounts-2` stopped, `accounts-2=UNHEALTHY` while `accounts-1=HEALTHY`, recovery to both `HEALTHY`, `0.00%` failed k6 requests, and a 10-second Locust cross-check with `0(0.00%)` failures and both replica hostnames in `X-Served-By`. The capture returned `RESULT: PASS`.

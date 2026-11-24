@@ -42,6 +42,11 @@ function Wait-Kong {
   }
 }
 
+function TargetHealthLine {
+  $health = Invoke-RestMethod 'http://127.0.0.1:8001/upstreams/accounts-upstream/health'
+  return (($health.data | Sort-Object target | ForEach-Object { "$($_.target)=$($_.health)" }) -join ' ')
+}
+
 switch ($Id) {
   '01' {
     Show 'docker compose ps'
@@ -243,9 +248,9 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
     Wait-Kong
 
     Show '.\advisor\.venv\Scripts\python.exe -m pytest advisor -v'
-    $tests = & .\advisor\.venv\Scripts\python.exe -m pytest advisor -v 2>&1 | Select-Object -Last 6
+    $tests = & .\advisor\.venv\Scripts\python.exe -m pytest advisor -v 2>&1 | Select-Object -Last 7
     $tests | ForEach-Object { Write-Host $_ }
-    $testsOk = [bool](($tests -join "`n") -match '14 passed')
+    $testsOk = [bool](($tests -join "`n") -match '15 passed')
 
     Show 'Invoke-RestMethod POST /api/advisor/analyze {"question":"How many requests were logged?"}'
     $overview = Invoke-RestMethod -Method Post -Uri $analyze -Headers $headers -ContentType 'application/json' -Body '{"question":"How many requests were logged?"}'
@@ -266,6 +271,13 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
     Write-Host ("rate_limited_total: " + $spike.stats.rate_limited_total)
     Write-Host ("citations: " + $spikeCitations)
 
+    Show 'Invoke-RestMethod POST /api/advisor/analyze {"question":"Which client IPs caused errors?"}'
+    $ips = Invoke-RestMethod -Method Post -Uri $analyze -Headers $headers -ContentType 'application/json' -Body '{"question":"Which client IPs caused errors?"}'
+    Write-Host ("summary : " + $ips.summary)
+    Write-Host ("verified: " + $ips.verified)
+    Write-Host ("distinct_client_ips: " + $ips.stats.distinct_client_ips)
+    Write-Host ("top_client_ip: " + $ips.stats.top_client_ip)
+
     Show 'Invoke-RestMethod POST /api/advisor/analyze {"question":"Why were there 503s?"}'
     $unsupported = Invoke-RestMethod -Method Post -Uri $analyze -Headers $headers -ContentType 'application/json' -Body '{"question":"Why were there 503s?"}'
     Write-Host ("summary : " + $unsupported.summary)
@@ -277,7 +289,8 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
     $endpoint = Invoke-RestMethod -Uri 'http://127.0.0.1:8000/api/advisor/stats/requests_total' -Headers $headers
     Write-Host ("stats endpoint: " + ($endpoint | ConvertTo-Json -Compress))
 
-    $ok = $testsOk -and $overview.verified -and $spike.verified `
+    $ok = $testsOk -and $overview.verified -and $spike.verified -and $ips.verified `
+      -and ($ips.stats.distinct_client_ips -gt 0) `
       -and ($unsupported.summary -eq 'No verified data') `
       -and ($unsupported.verified -eq $false) `
       -and ($unsupported.citations.Count -eq 0) `
@@ -328,6 +341,84 @@ print("X-Debug removed: " + ("YES" if "x-debug" not in h else "NO"))
       -and ($target.health -eq 'up') `
       -and ($ruleCount -eq 3) `
       -and (($amUrls -join ',') -match 'alertmanager:9093')
+    Finish $ok
+  }
+
+  '24' {
+    Wait-Kong
+
+    Show 'python scripts/fragment_lab.py parse'
+    $parsed = python scripts/fragment_lab.py parse 2>&1
+    $parsed | Where-Object { $_ -match 'parse successful' } | ForEach-Object { Write-Host $_ }
+
+    $hcText = Get-Content kong\kong.yml -Raw
+    $activeCount = [regex]::Matches($hcText, 'active:').Count
+    $passiveCount = [regex]::Matches($hcText, 'passive:').Count
+    $pathCount = [regex]::Matches($hcText, 'http_path: /health').Count
+    Show 'Select-String kong/kong.yml (healthchecks)'
+    Write-Host ("active=$activeCount passive=$passiveCount http_path=/health=$pathCount")
+
+    Show 'GET /upstreams/accounts-upstream/health (baseline)'
+    $baseline = TargetHealthLine
+    Write-Host $baseline
+
+    Show 'docker compose --profile load run --rm k6 (2 VUs, 45s)'
+    $job = Start-Job -ScriptBlock {
+      Set-Location 'C:\Users\ASUS\Desktop\kong-project'
+      docker compose --profile load run --rm k6 2>&1
+    }
+    Start-Sleep -Seconds 6
+
+    Show 'docker compose --profile core stop accounts-2'
+    docker compose --profile core stop accounts-2 2>&1 | Out-Null
+    Start-Sleep -Seconds 14
+
+    Show 'GET /upstreams/accounts-upstream/health (replica offline)'
+    $offline = TargetHealthLine
+    Write-Host $offline
+
+    Show 'docker compose --profile core start accounts-2'
+    docker compose --profile core start accounts-2 2>&1 | Out-Null
+    Start-Sleep -Seconds 14
+
+    Show 'GET /upstreams/accounts-upstream/health (recovered)'
+    $recovered = TargetHealthLine
+    Write-Host $recovered
+
+    $k6 = Receive-Job $job -Wait
+    Remove-Job $job
+    $k6Text = ($k6 -join "`n")
+    $checks = $k6 | Where-Object { $_ -match 'checks_succeeded' } | Select-Object -First 1
+    $failed = $k6 | Where-Object { $_ -match 'http_req_failed' } | Select-Object -Last 1
+    $served = $k6 | Where-Object { $_ -match 'served_by' } | Select-Object -Last 1
+    if ($null -ne $checks) { Write-Host $checks.Trim() }
+    if ($null -ne $failed) { Write-Host $failed.Trim() }
+    if ($null -ne $served) { Write-Host $served.Trim() }
+
+    Show 'docker compose --profile load run --rm locust -t 10s --only-summary'
+    $locust = docker compose --profile load run --rm locust `
+      -f /mnt/locust/locustfile.py --headless --host http://kong:8000 `
+      -u 2 -r 1 -t 10s --only-summary 2>&1
+    $locustText = ($locust -join ' ')
+    $locustReqs = 0
+    if ($locustText -match 'Aggregated\s+(\d+)\s+0\(0\.00%\)') {
+      $locustReqs = [int]$matches[1]
+    }
+    $distribution = $locust | Where-Object { $_ -match 'X-Served-By distribution' } | Select-Object -First 1
+    Write-Host ("Locust: $locustReqs reqs, 0 fails (0.00%)")
+    if ($null -ne $distribution) { Write-Host $distribution.Trim() }
+
+    $ok = (($parsed -join "`n") -match 'parse successful') `
+      -and ($activeCount -eq 3) -and ($passiveCount -eq 3) -and ($pathCount -eq 3) `
+      -and ($baseline -match 'accounts-1[^=]*=HEALTHY') -and ($baseline -match 'accounts-2[^=]*=HEALTHY') `
+      -and ($offline -match 'accounts-2[^=]*=UNHEALTHY') -and ($offline -match 'accounts-1[^=]*=HEALTHY') `
+      -and ($recovered -match 'accounts-1[^=]*=HEALTHY') -and ($recovered -match 'accounts-2[^=]*=HEALTHY') `
+      -and ($k6Text -match 'checks_succeeded\.+: 100\.00%') `
+      -and ($k6Text -match 'http_req_failed\.+: 0\.00%') `
+      -and ($k6Text -match 'served_by\.+: [1-9]\d*') `
+      -and ($locustReqs -gt 0) `
+      -and ($null -ne $distribution) `
+      -and ($distribution -match 'accounts-1') -and ($distribution -match 'accounts-2')
     Finish $ok
   }
 

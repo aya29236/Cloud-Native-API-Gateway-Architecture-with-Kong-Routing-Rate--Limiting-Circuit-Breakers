@@ -13,9 +13,15 @@ from app.main import app
 FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "access.json"
 
 
-def _record(status: int, *, consumer: str = "fintech-free", route: str = "accounts") -> dict:
+def _record(
+    status: int,
+    *,
+    consumer: str = "fintech-free",
+    route: str = "accounts",
+    client_ip: str = "192.168.1.10",
+) -> dict:
     return {
-        "client_ip": "192.168.1.10",
+        "client_ip": client_ip,
         "request": {"method": "GET", "uri": f"/api/{route}"},
         "response": {"status": status},
         "latencies": {"proxy": 12, "kong": 1, "request": 13},
@@ -35,6 +41,8 @@ def test_verified_overview_uses_fixture_citations(monkeypatch):
     assert result.summary == "Verified 1 C2-valid request(s) in the Kong access logs."
     assert result.stats["requests_total"] == 1
     assert result.stats["status_counts"] == {"200": 1}
+    assert result.stats["client_ip_counts"] == {"192.168.1.10": 1}
+    assert result.stats["distinct_client_ips"] == 1
     assert result.citations == ["[L1]"]
     assert [entry["tool"] for entry in result.tool_trace] == [
         "read_logs",
@@ -81,6 +89,32 @@ def test_429_jsonl_log_produces_verified_answer(monkeypatch, tmp_path):
     records, info = read_logs(str(log))
     assert info["valid_records"] == 2
     assert verify_answer(result, records, result.tool_trace) is True
+
+
+def test_offending_client_ip_stats_are_grounded(monkeypatch, tmp_path):
+    log = tmp_path / "access.json"
+    log.write_text(
+        "\n".join(
+            [
+                json.dumps(_record(429, client_ip="10.0.0.1")),
+                json.dumps(_record(200, client_ip="10.0.0.1")),
+                json.dumps(_record(503, client_ip="10.0.0.2")),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ADVISOR_LOG_PATH", str(log))
+
+    result = answer_question("Which client IPs caused errors?")
+
+    assert result.verified is True
+    assert result.stats["requests_total"] == 2
+    assert result.stats["status_counts"] == {"429": 1, "503": 1}
+    assert result.stats["client_ip_counts"] == {"10.0.0.1": 1, "10.0.0.2": 1}
+    assert result.stats["distinct_client_ips"] == 2
+    assert result.citations == ["[L1]", "[L3]"]
+    assert "client IP(s)" in result.summary
 
 
 def test_verifier_rejects_a_forged_citation(monkeypatch):
