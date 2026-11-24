@@ -46,7 +46,7 @@ jobs:
 
           expected = {
               "contracts/api/openapi.yml": "version: 0.3.0",
-              "contracts/metrics/alerts-contract.yml": "contract_version: 0.2.0",
+              "contracts/metrics/alerts-contract.yml": "contract_version: 0.2.1",
               "contracts/naming/environment.yml": "contract_version: 0.2.0",
           }
           for name, needle in expected.items():
@@ -147,16 +147,17 @@ jobs:
             prom/alertmanager:v0.28.1 \
             check-config /etc/alertmanager/alertmanager.yml
 
-      - name: Prometheus rules check (promtool, when Layer 4 rules exist)
+      - name: Prometheus config and rules check (promtool)
         run: |
-          if compgen -G "monitoring/rules/*.yml" > /dev/null; then
-            docker run --rm \
-              -v "$GITHUB_WORKSPACE/monitoring:/monitoring:ro" \
-              prom/prometheus:latest \
-              promtool check rules /monitoring/rules/*.yml
-          else
-            echo "promtool: no monitoring/rules/*.yml yet (Layer 4); skipped"
-          fi
+          docker run --rm --entrypoint promtool \
+            -v "$GITHUB_WORKSPACE/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$GITHUB_WORKSPACE/monitoring/rules:/etc/prometheus/rules:ro" \
+            prom/prometheus:v3.16.0 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint promtool \
+            -v "$GITHUB_WORKSPACE/monitoring/rules:/etc/prometheus/rules:ro" \
+            prom/prometheus:v3.16.0 \
+            check rules /etc/prometheus/rules/alerts.yml
 
       - name: Verifier / eval structural gate
         run: python n8n/workflows/validate.py

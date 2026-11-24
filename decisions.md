@@ -53,3 +53,11 @@
 ## DEC-013 — Terminal-window evidence screenshots
 - Status: Applied after the owner's correction
 - Decision: Formal evidence PNGs `01`, `02`, `03`, `08`, `19`, `20` and `21` are direct screenshots of a visible PowerShell terminal window captured by `scripts/capture-terminal-evidence.ps1` and `scripts/terminal-evidence-run.ps1`. This replaces the earlier plan to use browser-page screenshots; the transcript renderer `scripts/capture-evidence.ps1` remains available but is not the source of these PNGs.
+
+## DEC-014 — C3 PATCH 0.2.1 after live M1
+- Status: Applied after explicit A/B/C approval
+- Decision: Live M1 confirmed the canonical metric names on Kong 3.9.1 but found that `kong_upstream_target_health` is a state indicator with value `1` when the labelled state is populated; the original `== 0` expression would have fired on healthy targets. C3 is bumped from `0.2.0` to `0.2.1` as an editorial PATCH: the unhealthy rule selects `state=~"unhealthy|dns_error" == 1`, and all three rules derive the `service` label from the route/upstream name so Alertmanager grouping and inhibition work as designed. Alert names, thresholds, severities and webhook fields are unchanged.
+
+## DEC-015 — Layer 4 / M1 Prometheus implementation
+- Status: Applied after explicit A/B/C approval for the next implementation step
+- Decision: `monitoring/prometheus.yml` scrapes `kong:8100/metrics` every 5s and alerts `alertmanager:9093`; `monitoring/rules/alerts.yml` implements the three frozen C3 v0.2.1 expressions; `scripts/verify_metrics_contract.py` performs the live M1 check. Prometheus is pinned to `v3.16.0` in Compose and CI, which now runs both `promtool check config` and `promtool check rules`.

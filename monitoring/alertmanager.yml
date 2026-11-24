@@ -1,4 +1,4 @@
-# Alertmanager configuration — C3 v0.2.0 (approved, frozen).
+# Alertmanager configuration — C3 v0.2.1 (approved, frozen).
 #
 # Prometheus rules (Student C, M1) fire the three alerts named in C3.
 # Alertmanager groups them, inhibits the redundant circuit-open alert when

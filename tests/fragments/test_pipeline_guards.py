@@ -82,3 +82,24 @@ def test_live_kong_config_contains_layer2_plugins() -> None:
     ]
     missing = [item for item in required if item not in text]
     assert not missing, missing
+
+
+def test_c3_v021_rules_carry_service_labels() -> None:
+    contract = (ROOT / "contracts" / "metrics" / "alerts-contract.yml").read_text(
+        encoding="utf-8"
+    )
+    rules = (ROOT / "monitoring" / "rules" / "alerts.yml").read_text(encoding="utf-8")
+    assert "contract_version: 0.2.1" in contract
+    assert 'state=~"unhealthy|dns_error"} == 1' in contract
+    assert 'expected_labels: [alertname, route, consumer, service, severity]' in contract
+    assert 'expected_labels: [alertname, upstream, target, service, severity]' in contract
+    assert rules.count('expr: ') == 3
+    assert '"service", "$1"' in rules
+    assert 'state=~"unhealthy|dns_error"}' in rules
+
+
+def test_prometheus_scrapes_live_kong_status_api() -> None:
+    config = (ROOT / "monitoring" / "prometheus.yml").read_text(encoding="utf-8")
+    assert 'targets: ["kong:8100"]' in config
+    assert "metrics_path: /metrics" in config
+    assert 'targets: ["alertmanager:9093"]' in config

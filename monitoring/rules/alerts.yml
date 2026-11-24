@@ -1,0 +1,34 @@
+# Prometheus alert rules — C3 v0.2.1 (approved, frozen).
+# Generated from contracts/metrics/alerts-contract.yml by the live M1 check.
+# The service label is derived from the Kong route/upstream name so that
+# Alertmanager group_by and inhibition rules have the expected label.
+
+groups:
+  - name: fintech-kong-alerts
+    rules:
+      - alert: KongCircuitOpen
+        expr: 'label_replace(sum by (route) (rate(kong_http_requests_total{code="503"}[1m])) > 0, "service", "$1", "route", "(.+)-route")'
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit open on Kong route {{ $labels.route }}"
+          description: "HTTP 503 responses for at least 15 seconds on route {{ $labels.route }}."
+
+      - alert: Kong429Spike
+        expr: 'label_replace(sum by (route, consumer) (rate(kong_http_requests_total{code="429"}[1m])) > 0.5, "service", "$1", "route", "(.+)-route")'
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "429 spike on {{ $labels.route }} for {{ $labels.consumer }}"
+          description: "More than 0.5 HTTP 429 responses per second for 30 seconds."
+
+      - alert: KongUpstreamTargetUnhealthy
+        expr: 'sum by (service, upstream, target) (label_replace(kong_upstream_target_health{state=~"unhealthy|dns_error"} == 1, "service", "$1", "upstream", "(.+)-upstream")) > 0'
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Upstream target {{ $labels.target }} unhealthy"
+          description: "Target {{ $labels.target }} in upstream {{ $labels.upstream }} is unhealthy."

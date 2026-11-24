@@ -32,7 +32,7 @@ docker compose --profile core down
 
 ## Gate 0 status
 - [x] Initial repository layout
-- [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3/C4 v0.2.0)
+- [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3 v0.2.1, C4 v0.2.0)
 - [x] Sample Kong access-log fixture
 - [x] Fake Alertmanager payload fixture
 - [x] Mock upstream with `/health`, `/echo`, `/fail`, `/slow`
@@ -328,8 +328,24 @@ Notes:
 - `request-size-limiting` uses `allowed_payload_size: 1024` with `size_unit: bytes`; Kong's default unit is megabytes, so a bare `1` would allow 1 MB, not 1 KB.
 - G7 compared the real `file-log` line with C2 `0.1.1`: all required fields matched, so no contract version bump was needed.
 
+## Layer 4 / M1 — Prometheus and alert rules (Student C)
+
+- [x] C3 editorial PATCH `0.2.0` → `0.2.1` after live M1: `kong_upstream_target_health` is a state indicator with value `1` when the labelled state is populated, and all three rules now carry the `service` label needed by Alertmanager grouping/inhibition.
+- [x] `monitoring/prometheus.yml` scrapes `kong:8100/metrics` every 5s and forwards alerts to `alertmanager:9093`.
+- [x] `monitoring/rules/alerts.yml` implements the three frozen C3 v0.2.1 alert expressions.
+- [x] CI runs `promtool check config` and `promtool check rules` with Prometheus `v3.16.0`.
+
+Start the monitoring stack and run the live contract check:
+
+```powershell
+docker compose --profile core --profile monitoring up -d prometheus alertmanager
+python scripts/verify_metrics_contract.py
+```
+
+Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`.
+
 ## Contract change rule
 Contracts are versioned independently. Any breaking change requires a MAJOR version bump and approval from A, B and C. Backward-compatible additions require a MINOR bump. Editorial corrections require a PATCH bump. Record every accepted change in `decisions.md`.
 
 ## Important
-C1–C4 are approved and frozen by all three students and are the specifications the services implement. Live verification is still required at G7 (Kong access-log fields vs C2) and M1 (Prometheus metric names vs C3); a mismatch is handled by an approved, versioned contract change.
+C1–C4 are approved and frozen by all three students and are the specifications the services implement. G7 verified the real Kong access-log fields against C2, and M1 verified the real `/metrics` names and labels against C3; the M1 finding was handled by the approved C3 v0.2.1 PATCH. Any future mismatch requires an approved, versioned contract change.
