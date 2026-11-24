@@ -30,17 +30,67 @@ Stop:
 docker compose --profile core down
 ```
 
+## Kong deployment modes — theory overview
+
+This section is the written version of the professor's required comparison between Kong's two installation modes. It can be pasted directly into the presentation. The implemented prototype uses **DB-less mode only**; A/B/C approved a theory-only treatment of PostgreSQL mode, so no separate `docker-compose.dbmode.yml` lab is claimed.
+
+| Aspect | DB-less declarative mode (implemented) | PostgreSQL mode (theory only) |
+|---|---|---|
+| Source of truth | `kong/kong.yml` | Kong's PostgreSQL database |
+| Key environment | `KONG_DATABASE=off`, `KONG_DECLARATIVE_CONFIG=/etc/kong/kong.yml` | `KONG_DATABASE=postgres`, `KONG_PG_HOST`, `KONG_PG_DATABASE`, `KONG_PG_USER`, `KONG_PG_PASSWORD` |
+| Admin API | Read-only; changes are made by editing YAML and reloading/recreating Kong | Read/write; `GET/POST/PATCH/DELETE /services`, `/routes`, `/consumers`, `/plugins` mutate the database |
+| Bootstrap | `kong config parse kong.yml`, then start Kong with the file mounted | Start Postgres, run `kong migrations bootstrap`, start Kong, optionally `kong config db_import kong.yml` once |
+| Reload behaviour | Declarative config is loaded at startup; no migration state to manage | Schema migrations must be versioned and applied before upgrade |
+| Best fit | Reproducible labs, CI, GitOps, immutable prototypes | Long-lived platforms with dynamic Admin API changes and multiple operators |
+| Failure domain | Losing the container loses no gateway state; YAML remains in Git | Database availability and backups become critical |
+| In this project | `docker-compose.yml`, `kong/kong.yml`, evidence `01`, `02`, `03` | Explained here only; not implemented |
+
+Typical DB-less commands used by this project:
+
+```powershell
+docker compose exec kong kong config parse /etc/kong/kong.yml
+docker compose --profile core up -d --force-recreate kong
+curl.exe http://127.0.0.1:8001/services
+curl.exe -X DELETE http://127.0.0.1:8001/services/mock-upstream  # returns 405
+```
+
+Typical PostgreSQL-mode commands for the presentation, **not run in this prototype**:
+
+```bash
+# 1. Start a PostgreSQL container and a Kong container on separate ports.
+# 2. Initialise Kong's schema:
+kong migrations bootstrap
+
+# 3. Optional one-time import of the same declarative entities:
+kong config db_import /etc/kong/kong.yml
+
+# 4. Start Kong with KONG_DATABASE=postgres and the KONG_PG_* variables.
+# 5. Prove dynamic configuration through the Admin API:
+curl -i -X POST http://127.0.0.1:8001/services \
+  --data name=demo --data url=http://accounts-1:8000
+```
+
+The teaching point: DB-less Kong treats `kong.yml` as immutable desired state, while PostgreSQL-mode Kong treats the Admin API and the database as live mutable state. Both expose the same proxy/plugin model; they differ in how configuration is stored, changed and operated.
+
+## Presentation
+
+The theoretical + practical PowerPoint deck is `presentation/FinTech_API_Gateway.pptx` (24 slides, English). It covers the professor's mandatory definitions, Kong entities, plugin phases, rate-limiting algorithms, active/passive health checks, two custom diagrams, DB-less vs PostgreSQL theory, the comparison matrix, Steps 1–4, evidence gallery, Final Gate result and the approved Ollama roadmap.
+
+- Source outline: `presentation/slides.md`
+- Reproducible builder: `python scripts/build_presentation.py` (stdlib OOXML, no third-party library)
+- The demo recording is owned by the students; no demo video is generated in this repository.
+
 ## Gate 0 status
 - [x] Initial repository layout
-- [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3/C4 v0.2.0)
+- [x] Contracts C1–C4 approved and frozen by all three students (C1 v0.3.0, C2 v0.1.1, C3 v0.2.1, C4 v0.2.1)
 - [x] Sample Kong access-log fixture
 - [x] Fake Alertmanager payload fixture
 - [x] Mock upstream with `/health`, `/echo`, `/fail`, `/slow`
 - [x] Compose skeleton and core profile
-- [x] CI workflow implemented (branch protection still to be configured on GitHub)
+- [x] Branch protection configured on GitHub (re-verification requires an authenticated token)
 - [x] All three students approve contracts
 - [ ] LLM tool-calling spike completed by all three
-- [ ] Open questions sent to professor
+- [x] Open questions sent to professor
 
 ## Continuous integration
 
@@ -114,9 +164,33 @@ Accounts and Payments share one PostgreSQL 16 database (DEC-008); table names ar
 
 - [x] V3.1 FastAPI shell, `/health`, Pydantic C1 models, stub `/analyze` ("No verified data"), `/stats`, `X-Served-By` (8 tests green)
 - [x] V3.2 `advisor-1`/`advisor-2` containers with read-only `kong-logs` mount (8/8 green inside the container)
-- [ ] C plugs the verified analyzer into the shell (Layer 5)
+- [x] V3.3 Layer 5 verified tool-calling analyzer: `read_logs` → `filter_records` → `aggregate` → `verify_answer`, with grounded client-IP/route stats and exact C1 fallback when no tool result supports the question
 
 FastAPI serves Swagger UI at `http://127.0.0.1:8000/docs` once Kong routes `/api/advisor` at Layer 1. Locally: `cd advisor; .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload`.
+
+### Layer 5 / M5 — verified analyzer
+
+`advisor/app/analyzer.py` never invents an answer or calls an external LLM. It reads only the read-only `/var/log/kong/access.json` mount (`ADVISOR_LOG_PATH`), accepts only C2 0.1.1-valid records, and returns citations `[L<id>]` whose ids are checked against the records loaded for that request. Every number in the summary comes from the `aggregate` tool result, including `client_ip_counts`, `distinct_client_ips` and `top_client_ip` for offending-IP/route questions. If there are no valid records, no matching records, a forged citation, or any other failed check, the response is exactly `summary: "No verified data"`, `verified: false`, `citations: []`.
+
+```powershell
+cd advisor
+.\.venv\Scripts\python.exe -m pytest
+
+# Live through Kong after rebuilding the advisor replicas:
+docker compose --profile core up -d --build advisor-1 advisor-2
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/advisor/analyze `
+  -Headers @{ apikey = 'premium-demo-key' } -ContentType 'application/json' `
+  -Body '{"question":"How many requests were logged?"}'
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/advisor/analyze `
+  -Headers @{ apikey = 'premium-demo-key' } -ContentType 'application/json' `
+  -Body '{"question":"Which client IPs caused errors?"}'
+Invoke-RestMethod http://127.0.0.1:8000/api/advisor/stats -Headers @{ apikey = 'premium-demo-key' }
+
+# Formal evidence 22 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '22' -Output 'screenshots\22_layer5_verified_analyzer.png'
+```
+
+The response carries the five frozen C1 fields plus a `tool_trace` that names each tool, its arguments and its result. No raw Kong headers or credentials are copied into the trace.
 
 ## Monitoring and automation — Student B (M2/M3)
 
@@ -186,6 +260,30 @@ curl.exe -s -o NUL -w '%{http_code}' -X DELETE http://127.0.0.1:8001/services/mo
 # expect the two replica hostnames alternating
 ```
 
+## Layer 3 / Step 3 — health checks and chaos failover
+
+- [x] `kong/fragments/60-healthchecks.yml`: active `/health` polling and passive 5xx/tcp/timeout checks on all three upstreams; HTTP 429 is excluded so rate limiting does not mark a target down. Explicitly merged into `kong/kong.yml` and parsed in all eight `verify_fragments.py` scenarios.
+- [x] Real load generators: `tests/load/k6_failover.js` and `tests/load/locustfile.py` under the `load` Compose profile (`grafana/k6:1.8.0`, `locustio/locust:2.47.0`).
+- [x] Live chaos result: with a 2-VU 45-second k6 run, stopping `accounts-2` made `accounts-upstream` report `accounts-2=UNHEALTHY` while `accounts-1=HEALTHY`; restarting it recovered both to `HEALTHY`. k6 recorded `100.00%` successful checks and `0.00%` failed requests. A 10-second Locust run independently recorded `0(0.00%)` failures with both replicas in `X-Served-By`.
+
+```powershell
+# Load the healthchecks into live Kong and verify all explicit merges:
+docker compose --profile core up -d --force-recreate kong
+python scripts/verify_fragments.py
+curl.exe -s http://127.0.0.1:8001/upstreams/accounts-upstream/health
+
+# Concurrent load while one replica is offline:
+docker compose --profile load run --rm k6
+docker compose --profile core stop accounts-2
+docker compose --profile core start accounts-2
+docker compose --profile load run --rm locust `
+  -f /mnt/locust/locustfile.py --headless --host http://kong:8000 `
+  -u 2 -r 1 -t 10s --only-summary
+
+# Formal evidence 24 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '24' -Output 'screenshots\24_layer3_chaos_failover.png'
+```
+
 Evidence (real screenshots of the PowerShell terminal window, captured by `scripts/capture-terminal-evidence.ps1` while the commands run):
 
 | ID | File | Format | Storage | Verification |
@@ -197,6 +295,10 @@ Evidence (real screenshots of the PowerShell terminal window, captured by `scrip
 | 19 | `screenshots/19_layer2_auth_matrix.png` | PNG | repo `screenshots/` | live key-auth/JWT matrix + merged plugin inventory on Accounts/Payments/Advisor |
 | 20 | `screenshots/20_layer2_rate_token_tls.png` | PNG | repo `screenshots/` | live G3 tiered limits, G4 token-bucket parity and G5 HTTPS/SAN checks |
 | 21 | `screenshots/21_layer2_telemetry.png` | PNG | repo `screenshots/` | `kong_*` metrics on :8100 plus a C2 0.1.1 `file-log` field check |
+| 22 | `screenshots/22_layer5_verified_analyzer.png` | PNG | repo `screenshots/` | 15 Advisor tests green, verified overview, 429 answer with citations, grounded client-IP stats, exact 503 fallback, and `/stats` through Kong |
+| 23 | `screenshots/23_layer4_prometheus_m1.png` | PNG | repo `screenshots/` | M1 contract check PASS, promtool config/rules SUCCESS, Kong target up, 3 rules loaded, Alertmanager connected |
+| 24 | `screenshots/24_layer3_chaos_failover.png` | PNG | repo `screenshots/` | active/passive healthchecks, k6 load with `accounts-2` offline, UNHEALTHY → HEALTHY recovery, 0% failures, Locust cross-check |
+| 25 | `screenshots/25_final_gate_audit.png` | PNG | repo `screenshots/` | `scripts/final_gate_audit.py` PASS on all 53 automated checks, with explicit WARN items |
 
 Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG is a direct screenshot of a visible PowerShell window running the live commands; regenerate one with:
 
@@ -208,7 +310,7 @@ Images are stored in `screenshots/NN_topic.png` per Master Plan §8.3. Each PNG 
 
 ## Independent wave — G2–G7 (Students A and C)
 
-No numbered evidence was due for the independent wave; each module's own test was green and the transcript is saved in `tests/fragments/independent-wave-results.txt`. Layer 2 / I3 has now explicitly merged all six fragments into the live `kong/kong.yml`; the fragment files remain the source definitions and the live file is the DB-less source of truth.
+No numbered evidence was due for the independent wave; each module's own test was green and the transcript is saved in `tests/fragments/independent-wave-results.txt`. Layer 2 / I3 explicitly merged all six G2–G7 fragments into the live `kong/kong.yml`; Layer 3 added the seventh `60-healthchecks.yml` fragment. The fragment files remain the source definitions and the live file is the DB-less source of truth.
 
 | WP | Owner | Fragment / script | Mock-upstream result |
 |---|---|---|---|
@@ -328,8 +430,42 @@ Notes:
 - `request-size-limiting` uses `allowed_payload_size: 1024` with `size_unit: bytes`; Kong's default unit is megabytes, so a bare `1` would allow 1 MB, not 1 KB.
 - G7 compared the real `file-log` line with C2 `0.1.1`: all required fields matched, so no contract version bump was needed.
 
+## Layer 4 / M1 — Prometheus and alert rules (Student C)
+
+- [x] C3 editorial PATCH `0.2.0` → `0.2.1` after live M1: `kong_upstream_target_health` is a state indicator with value `1` when the labelled state is populated, and all three rules now carry the `service` label needed by Alertmanager grouping/inhibition.
+- [x] `monitoring/prometheus.yml` scrapes `kong:8100/metrics` every 5s and forwards alerts to `alertmanager:9093`.
+- [x] `monitoring/rules/alerts.yml` implements the three frozen C3 v0.2.1 alert expressions.
+- [x] CI runs `promtool check config` and `promtool check rules` with Prometheus `v3.16.0`.
+
+Start the monitoring stack and run the live contract check:
+
+```powershell
+docker compose --profile core --profile monitoring up -d prometheus alertmanager
+python scripts/verify_metrics_contract.py
+
+# Formal evidence 23 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '23' -Output 'screenshots\23_layer4_prometheus_m1.png'
+```
+
+Prometheus UI: `http://127.0.0.1:9090`. Alertmanager UI: `http://127.0.0.1:9093`.
+
+## Final Gate audit
+
+`scripts/final_gate_audit.py` is a stdlib-only audit of the live prototype and the repository artifacts. It checks the four frozen contracts, Kong topology/healthchecks, C1 auth and headers, the live C2 access-log line, C3 metrics/alerts/n8n, C4 Compose/load generators, the Layer 5 analyzer, evidence files, CI job structure and branch invariants. The current run is **PASS WITH WARNINGS**: 54/54 automated checks pass, while the script deliberately reports these open items instead of hiding them:
+
+- Owner evidence IDs `10`, `11`, `13` and `14` are not present in `screenshots/`; `14` remains blocked on Telegram test credentials.
+- Gate 0 still has one unchecked question: the LLM tool-calling spike completed by all three students. The professor-questions item is now confirmed sent by A/B/C.
+- No authenticated GitHub token was available to re-read `main` branch protection; the earlier applied protection is unchanged but not re-verified in this run.
+
+```powershell
+python scripts/final_gate_audit.py
+
+# Formal evidence 25 (real PowerShell terminal window):
+.\scripts\capture-terminal-evidence.ps1 -Id '25' -Output 'screenshots\25_final_gate_audit.png'
+```
+
 ## Contract change rule
 Contracts are versioned independently. Any breaking change requires a MAJOR version bump and approval from A, B and C. Backward-compatible additions require a MINOR bump. Editorial corrections require a PATCH bump. Record every accepted change in `decisions.md`.
 
 ## Important
-C1–C4 are approved and frozen by all three students and are the specifications the services implement. Live verification is still required at G7 (Kong access-log fields vs C2) and M1 (Prometheus metric names vs C3); a mismatch is handled by an approved, versioned contract change.
+C1–C4 are approved and frozen by all three students and are the specifications the services implement. G7 verified the real Kong access-log fields against C2, and M1 verified the real `/metrics` names and labels against C3; the M1 finding was handled by the approved C3 v0.2.1 PATCH. Any future mismatch requires an approved, versioned contract change.

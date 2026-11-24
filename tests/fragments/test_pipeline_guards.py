@@ -82,3 +82,53 @@ def test_live_kong_config_contains_layer2_plugins() -> None:
     ]
     missing = [item for item in required if item not in text]
     assert not missing, missing
+
+
+def test_upstreams_have_active_and_passive_healthchecks() -> None:
+    text = (ROOT / "kong" / "kong.yml").read_text(encoding="utf-8")
+    fragment = (ROOT / "kong" / "fragments" / "60-healthchecks.yml").read_text(
+        encoding="utf-8"
+    )
+    assert text.count("healthchecks:") == 3
+    assert text.count("active:") == 3
+    assert text.count("passive:") == 3
+    assert text.count("http_path: /health") == 3
+    assert fragment.count("-upstream") == 3
+    assert "http_statuses: [500, 502, 503, 504]" in text
+    for line in text.splitlines():
+        if "http_statuses:" in line:
+            assert "429" not in line, line
+
+
+def test_k6_and_locust_load_generators_are_wired() -> None:
+    k6 = (ROOT / "tests" / "load" / "k6_failover.js").read_text(encoding="utf-8")
+    locust = (ROOT / "tests" / "load" / "locustfile.py").read_text(encoding="utf-8")
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert "import http from 'k6/http'" in k6
+    assert "served_by" in k6
+    assert "class GatewayUser(HttpUser)" in locust
+    assert "@events.test_stop.add_listener" in locust
+    assert "grafana/k6:1.8.0" in compose
+    assert "locustio/locust:2.47.0" in compose
+    assert 'profiles: ["load"]' in compose
+
+
+def test_c3_v021_rules_carry_service_labels() -> None:
+    contract = (ROOT / "contracts" / "metrics" / "alerts-contract.yml").read_text(
+        encoding="utf-8"
+    )
+    rules = (ROOT / "monitoring" / "rules" / "alerts.yml").read_text(encoding="utf-8")
+    assert "contract_version: 0.2.1" in contract
+    assert 'state=~"unhealthy|dns_error"} == 1' in contract
+    assert 'expected_labels: [alertname, route, consumer, service, severity]' in contract
+    assert 'expected_labels: [alertname, upstream, target, service, severity]' in contract
+    assert rules.count('expr: ') == 3
+    assert '"service", "$1"' in rules
+    assert 'state=~"unhealthy|dns_error"}' in rules
+
+
+def test_prometheus_scrapes_live_kong_status_api() -> None:
+    config = (ROOT / "monitoring" / "prometheus.yml").read_text(encoding="utf-8")
+    assert 'targets: ["kong:8100"]' in config
+    assert "metrics_path: /metrics" in config
+    assert 'targets: ["alertmanager:9093"]' in config

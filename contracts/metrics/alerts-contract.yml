@@ -1,4 +1,4 @@
-contract_version: 0.2.0
+contract_version: 0.2.1
 status: approved
 frozen: true
 approved_by:
@@ -12,6 +12,12 @@ version_history:
   - "0.2.0: added canonical metric names, labels, concrete thresholds,
     severities, annotations, Alertmanager grouping and a complete sample
     webhook payload; promoted to approved and frozen."
+  - "0.2.1: editorial PATCH after live M1. Kong 3.9.1 exports
+    kong_upstream_target_health as a state indicator whose value is 1 when the
+    labelled state is populated, so the unhealthy expression now selects
+    state=~\"unhealthy|dns_error\" == 1. All three rules now derive the service
+    label needed by Alertmanager grouping and inhibition. No alert names,
+    thresholds, severities or webhook fields changed."
 
 metric_source:
   exporter: kong-prometheus-plugin
@@ -21,7 +27,8 @@ metric_source:
     The names below are the canonical contract names used by the rules.
     M1 confirms the exact exporter names against the live kong:3.9.1
     /metrics endpoint. Any difference is a versioned contract change,
-    never an undocumented local edit.
+    never an undocumented local edit. kong_upstream_target_health exports
+    one series per state with value 1 when that state is populated.
 
 metrics:
   - name: kong_http_requests_total
@@ -48,7 +55,7 @@ rate_limit_reference:
 
 alerts:
   - name: KongCircuitOpen
-    expression: 'sum by (route) (rate(kong_http_requests_total{code="503"}[1m])) > 0'
+    expression: 'label_replace(sum by (route) (rate(kong_http_requests_total{code="503"}[1m])) > 0, "service", "$1", "route", "(.+)-route")'
     for: 15s
     severity: critical
     meaning: All targets for a route are unhealthy and Kong returns HTTP 503.
@@ -58,14 +65,14 @@ alerts:
       description: "HTTP 503 responses for at least 15 seconds on route {{ $labels.route }}."
     workflow: circuit-open
   - name: Kong429Spike
-    expression: 'sum by (route, consumer) (rate(kong_http_requests_total{code="429"}[1m])) > 0.5'
+    expression: 'label_replace(sum by (route, consumer) (rate(kong_http_requests_total{code="429"}[1m])) > 0.5, "service", "$1", "route", "(.+)-route")'
     for: 30s
     severity: warning
     meaning: |
       HTTP 429 responses exceed 0.5 per second (30 per minute) for 30
       seconds, grouped by route and consumer. This is three times the
       fintech-free allowance of 10/min and flags a sustained burst.
-    expected_labels: [alertname, route, consumer, severity]
+    expected_labels: [alertname, route, consumer, service, severity]
     optional_labels: [consumer]
     note: The consumer label is used only if the exporter provides it.
     annotations:
@@ -73,11 +80,11 @@ alerts:
       description: "More than 0.5 HTTP 429 responses per second for 30 seconds."
     workflow: "429"
   - name: KongUpstreamTargetUnhealthy
-    expression: 'kong_upstream_target_health == 0'
+    expression: 'sum by (service, upstream, target) (label_replace(kong_upstream_target_health{state=~"unhealthy|dns_error"} == 1, "service", "$1", "upstream", "(.+)-upstream")) > 0'
     for: 10s
     severity: critical
-    meaning: A Kong upstream target is marked unhealthy by active or passive checks.
-    expected_labels: [alertname, upstream, target, severity]
+    meaning: A Kong upstream target is marked unhealthy or has a DNS error; service is derived from the upstream name for inhibition.
+    expected_labels: [alertname, upstream, target, service, severity]
     annotations:
       summary: "Upstream target {{ $labels.target }} unhealthy"
       description: "Target {{ $labels.target }} in upstream {{ $labels.upstream }} is unhealthy."

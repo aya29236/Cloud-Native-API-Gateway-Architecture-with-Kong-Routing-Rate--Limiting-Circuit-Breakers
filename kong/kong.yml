@@ -76,8 +76,34 @@ services:
 
 
 upstreams:
+  # Layer 3 / Step 3: active checks poll C1 /health; passive checks count 5xx
+  # responses from real traffic. 429 is excluded so rate limiting alone does
+  # not mark a healthy target as down. Source: kong/fragments/60-healthchecks.yml.
   - name: accounts-upstream
     algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        timeout: 2
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+        unhealthy:
+          interval: 5
+          http_statuses: [500, 502, 503, 504]
+          http_failures: 2
+          tcp_failures: 2
+          timeouts: 2
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          http_statuses: [500, 502, 503, 504]
+          http_failures: 2
+          tcp_failures: 2
+          timeouts: 2
     targets:
       - target: accounts-1:8000
         weight: 100
@@ -86,6 +112,29 @@ upstreams:
 
   - name: payments-upstream
     algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        timeout: 2
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+        unhealthy:
+          interval: 5
+          http_statuses: [500, 502, 503, 504]
+          http_failures: 2
+          tcp_failures: 2
+          timeouts: 2
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          http_statuses: [500, 502, 503, 504]
+          http_failures: 2
+          tcp_failures: 2
+          timeouts: 2
     targets:
       - target: payments-1:8000
         weight: 100
@@ -94,6 +143,29 @@ upstreams:
 
   - name: advisor-upstream
     algorithm: round-robin
+    healthchecks:
+      active:
+        type: http
+        http_path: /health
+        timeout: 2
+        concurrency: 10
+        healthy:
+          interval: 5
+          successes: 2
+        unhealthy:
+          interval: 5
+          http_statuses: [500, 502, 503, 504]
+          http_failures: 2
+          tcp_failures: 2
+          timeouts: 2
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          http_statuses: [500, 502, 503, 504]
+          http_failures: 2
+          tcp_failures: 2
+          timeouts: 2
     targets:
       - target: advisor-1:8000
         weight: 100

@@ -1,4 +1,4 @@
-contract_version: 0.2.0
+contract_version: 0.2.1
 status: approved
 frozen: true
 approved_by:
@@ -11,6 +11,9 @@ version_history:
   - "0.1.0: initial draft with Kong, service replicas, ports and profiles."
   - "0.2.0: added PostgreSQL 16, the mock upstream, Locust/k6, monitoring,
     automation, AI runtime and DB-mode lab names; promoted to approved."
+  - "0.2.1: editorial PATCH. Removed the unimplemented separate Kong DB-mode lab
+    promise. PostgreSQL mode is explained as theory in README.md, matching the
+    professor énoncé; the practical prototype remains DB-less only."
 
 project: fintech-api-gateway
 compose_project_name: fintech-api-gateway
@@ -84,8 +87,8 @@ volumes: [kong-logs, postgres-data]
 compose_profiles: [core, monitoring, ai, load]
 compose_files:
   main: docker-compose.yml
-  dbmode_lab: docker-compose.dbmode.yml
-  dbmode_note: Separate Kong + PostgreSQL mode lab on non-conflicting ports.
+  dbmode_note: PostgreSQL mode is documented as theory only in README.md; no
+    separate DB-mode lab is implemented. The practical prototype is DB-less.
 
 environment_variables:
   - KONG_IMAGE

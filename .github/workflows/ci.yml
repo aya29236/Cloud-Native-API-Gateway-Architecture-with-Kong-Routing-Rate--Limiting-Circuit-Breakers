@@ -46,8 +46,8 @@ jobs:
 
           expected = {
               "contracts/api/openapi.yml": "version: 0.3.0",
-              "contracts/metrics/alerts-contract.yml": "contract_version: 0.2.0",
-              "contracts/naming/environment.yml": "contract_version: 0.2.0",
+              "contracts/metrics/alerts-contract.yml": "contract_version: 0.2.1",
+              "contracts/naming/environment.yml": "contract_version: 0.2.1",
           }
           for name, needle in expected.items():
               assert needle in Path(name).read_text(encoding="utf-8"), name
@@ -58,7 +58,7 @@ jobs:
         run: python scripts/fragment_lab.py parse
 
       - name: Validate Compose profiles
-        run: docker compose --profile core --profile monitoring config --quiet
+        run: docker compose --profile core --profile monitoring --profile load config --quiet
 
       - name: Check evidence filenames
         run: |
@@ -126,6 +126,11 @@ jobs:
       - name: Plugin simulator + offline guard tests
         run: python -m pytest tests/fragments -q
 
+      - name: Validate load generator scripts
+        run: |
+          python -m py_compile tests/load/locustfile.py
+          test -s tests/load/k6_failover.js
+
       - name: Parse every fragment via explicit merge into kong.yml (Kong 3.9.1)
         run: python scripts/verify_fragments.py
 
@@ -147,16 +152,17 @@ jobs:
             prom/alertmanager:v0.28.1 \
             check-config /etc/alertmanager/alertmanager.yml
 
-      - name: Prometheus rules check (promtool, when Layer 4 rules exist)
+      - name: Prometheus config and rules check (promtool)
         run: |
-          if compgen -G "monitoring/rules/*.yml" > /dev/null; then
-            docker run --rm \
-              -v "$GITHUB_WORKSPACE/monitoring:/monitoring:ro" \
-              prom/prometheus:latest \
-              promtool check rules /monitoring/rules/*.yml
-          else
-            echo "promtool: no monitoring/rules/*.yml yet (Layer 4); skipped"
-          fi
+          docker run --rm --entrypoint promtool \
+            -v "$GITHUB_WORKSPACE/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            -v "$GITHUB_WORKSPACE/monitoring/rules:/etc/prometheus/rules:ro" \
+            prom/prometheus:v3.16.0 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm --entrypoint promtool \
+            -v "$GITHUB_WORKSPACE/monitoring/rules:/etc/prometheus/rules:ro" \
+            prom/prometheus:v3.16.0 \
+            check rules /etc/prometheus/rules/alerts.yml
 
       - name: Verifier / eval structural gate
         run: python n8n/workflows/validate.py

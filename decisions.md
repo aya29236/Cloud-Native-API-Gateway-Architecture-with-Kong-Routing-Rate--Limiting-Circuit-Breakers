@@ -44,7 +44,7 @@
 
 ## DEC-011 — Explicit fragment merges into kong.yml
 - Status: Applied after the owner's explicit correction
-- Decision: `scripts/fragment_lab.py` accepts no fragment paths and contains no merge logic; it only parses or boots the current `kong/kong.yml`. `scripts/verify_fragments.py` uses stdlib text handling (no PyYAML, no temporary merged config) to write each dependency-aware scenario explicitly into `kong/kong.yml`, parse it with Kong 3.9.1, and restore the previous file. CI runs 7 scenarios; standalone parses of consumer-scoped fragments are intentionally excluded because they require `10-auth.yml`. The live G2–G7 redo used the same explicit-merge helper before every container boot and restored `kong.yml` at the end.
+- Decision: `scripts/fragment_lab.py` accepts no fragment paths and contains no merge logic; it only parses or boots the current `kong/kong.yml`. `scripts/verify_fragments.py` uses stdlib text handling (no PyYAML, no temporary merged config) to write each dependency-aware scenario explicitly into `kong/kong.yml`, parse it with Kong 3.9.1, and restore the previous file. CI runs 8 scenarios after `60-healthchecks.yml` was added; standalone parses of consumer-scoped fragments are intentionally excluded because they require `10-auth.yml`. The live G2–G7 redo used the same explicit-merge helper before every container boot and restored `kong.yml` at the end.
 
 ## DEC-012 — Layer 2 / I3 live fragment integration
 - Status: Applied after explicit A/B/C approval for the next implementation step
@@ -53,3 +53,53 @@
 ## DEC-013 — Terminal-window evidence screenshots
 - Status: Applied after the owner's correction
 - Decision: Formal evidence PNGs `01`, `02`, `03`, `08`, `19`, `20` and `21` are direct screenshots of a visible PowerShell terminal window captured by `scripts/capture-terminal-evidence.ps1` and `scripts/terminal-evidence-run.ps1`. This replaces the earlier plan to use browser-page screenshots; the transcript renderer `scripts/capture-evidence.ps1` remains available but is not the source of these PNGs.
+
+## DEC-014 — C3 PATCH 0.2.1 after live M1
+- Status: Applied after explicit A/B/C approval
+- Decision: Live M1 confirmed the canonical metric names on Kong 3.9.1 but found that `kong_upstream_target_health` is a state indicator with value `1` when the labelled state is populated; the original `== 0` expression would have fired on healthy targets. C3 is bumped from `0.2.0` to `0.2.1` as an editorial PATCH: the unhealthy rule selects `state=~"unhealthy|dns_error" == 1`, and all three rules derive the `service` label from the route/upstream name so Alertmanager grouping and inhibition work as designed. Alert names, thresholds, severities and webhook fields are unchanged.
+
+## DEC-015 — Layer 4 / M1 Prometheus implementation
+- Status: Applied after explicit A/B/C approval for the next implementation step
+- Decision: `monitoring/prometheus.yml` scrapes `kong:8100/metrics` every 5s and alerts `alertmanager:9093`; `monitoring/rules/alerts.yml` implements the three frozen C3 v0.2.1 expressions; `scripts/verify_metrics_contract.py` performs the live M1 check. Prometheus is pinned to `v3.16.0` in Compose and CI, which now runs both `promtool check config` and `promtool check rules`.
+
+## DEC-016 — Layer 5 / M5 verified analyzer
+- Status: Applied after explicit A/B/C approval for the next implementation step
+- Decision: The V3.1 stub is replaced by `advisor/app/analyzer.py`, a deterministic tool loop (`read_logs`, `filter_records`, `aggregate`, `verify_answer`) that answers only from C2-valid records in the read-only Kong log mount. Citations `[L<id>]` and every summary number are checked against the records loaded for that request; any unsupported result returns the exact C1 fallback `"No verified data"` with `verified=false`. No external LLM or network call is introduced. `/stats` and `/stats/<name>` now expose the same verified aggregate, and Compose sets `ADVISOR_LOG_PATH=/var/log/kong/access.json` on both replicas.
+
+## DEC-017 — Layer 5 terminal evidence 22
+- Status: Applied after explicit A/B/C approval for the M5 evidence step
+- Decision: Evidence `screenshots/22_layer5_verified_analyzer.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 22` branch in `scripts/terminal-evidence-run.ps1`. The window shows the 15-test Advisor suite, a verified overview, a verified 429 answer with `[L…]` citations, grounded client-IP stats, the exact 503 `"No verified data"` fallback, and the live `/stats` endpoint through Kong. The capture was regenerated after the IP-stats change and returned `RESULT: PASS`.
+
+## DEC-018 — Layer 4 terminal evidence 23
+- Status: Applied after explicit A/B/C approval for the M1 evidence step
+- Decision: Evidence `screenshots/23_layer4_prometheus_m1.png` is a direct screenshot of a visible PowerShell window captured by `scripts/capture-terminal-evidence.ps1` with a new `-Id 23` branch in `scripts/terminal-evidence-run.ps1`. The window shows `python scripts/verify_metrics_contract.py` returning `M1 RESULT: PASS`, `promtool check config` and `promtool check rules` SUCCESS lines, the Kong target `up`, 3 loaded rules in `fintech-kong-alerts`, and the active Alertmanager URL. The capture returned `RESULT: PASS`.
+
+## DEC-019 — Layer 3 Step 3 failover and grounded client-IP stats
+- Status: Applied after explicit A/B/C approval for "Implement all gaps"
+- Decision: `kong/fragments/60-healthchecks.yml` adds active `/health` polling and passive 5xx/tcp/timeout checks to all three round-robin upstreams; 429 is excluded so rate limiting alone cannot mark a target unhealthy. The fragment is explicitly merged into `kong/kong.yml` and parsed by all eight `scripts/verify_fragments.py` scenarios. `tests/load/k6_failover.js` and `tests/load/locustfile.py` are real load generators under a new `load` Compose profile (`grafana/k6:1.8.0`, `locustio/locust:2.47.0`).
+- Decision: The analyzer now aggregates `client_ip_counts`, `distinct_client_ips` and `top_client_ip` only from C2-valid records selected by the verified tool loop; the new fields stay inside C1's `stats` object, whose `additionalProperties: true` keeps contract version `0.3.0` frozen.
+- Decision: Evidence `screenshots/24_layer3_chaos_failover.png` is a direct screenshot of a visible PowerShell window. It shows baseline `HEALTHY` targets, a 2-VU 45-second k6 run with `accounts-2` stopped, `accounts-2=UNHEALTHY` while `accounts-1=HEALTHY`, recovery to both `HEALTHY`, `0.00%` failed k6 requests, and a 10-second Locust cross-check with `0(0.00%)` failures and both replica hostnames in `X-Served-By`. The capture returned `RESULT: PASS`.
+
+## DEC-020 — Final Gate audit
+- Status: Applied after explicit A/B/C approval for the Final Gate audit
+- Decision: `scripts/final_gate_audit.py` is the reproducible stdlib-only Final Gate audit. Its current result is `PASS WITH WARNINGS`: 54/54 automated checks pass across C1–C4 contracts, Kong topology/healthchecks, live C1 auth/headers, live C2 log fields, C3 Prometheus/Alertmanager/n8n, C4 Compose/load generators, Layer 5 analyzer, evidence files, CI structure and branch invariants.
+- Decision: The audit intentionally reports open items as WARN rather than marking them complete: owner evidence IDs `10`, `11`, `13`, `14`; the Gate 0 checkbox for the LLM tool-calling spike; absent Telegram credentials; and the inability to re-read `main` branch protection without an authenticated GitHub token. The professor-questions checkbox was subsequently confirmed sent by A/B/C and is now checked.
+- Decision: Evidence `screenshots/25_final_gate_audit.png` is a direct screenshot of a visible PowerShell window running that audit. The capture returned `RESULT: PASS`.
+
+## DEC-021 — Gate 0 professor questions closed
+- Status: Approved by A Eya Derouiche, B Aya Fayachi and C Wafe Bziouiche
+- Decision: The Gate 0 item "Open questions sent to professor" is marked complete. The LLM tool-calling spike remains open because A/B/C did not approve the V3.3 analyzer as that specific spike and have not supplied the separate spike record. Owner evidence IDs `10`, `11` and `13` also remain open pending the exact Master Plan topics; evidence `14` stays documented as blocked on Telegram credentials.
+
+## DEC-022 — Kong DB-mode theory only
+- Status: Approved by A Eya Derouiche, B Aya Fayachi and C Wafe Bziouiche
+- Decision: The professor's énoncé requires an overview of Kong DB-less declarative mode versus PostgreSQL mode, not a practical DB-mode lab. A/B/C chose "no lab; add theory only".
+- Decision: `README.md` now contains a paste-ready "Kong deployment modes — theory overview" section with a mode comparison, bootstrap commands, Admin API read/write distinction, and the teaching point that Git-owned YAML is the source of truth in DB-less mode while PostgreSQL and migrations are the source of truth in DB mode. No `docker-compose.dbmode.yml` is created or claimed.
+- Decision: C4 is bumped by an editorial PATCH from `0.2.0` to `0.2.1` to remove the unimplemented `dbmode_lab` promise and record the theory-only scope. No names, ports, profiles, service behaviour or evidence semantics change. The CI expected contract string and `contracts/README.md` table are updated with it.
+- Decision: Evidence `screenshots/25_final_gate_audit.png` is recaptured after the audit gains the DB-less-vs-Postgres theory check; the audit remains `PASS WITH WARNINGS` with 54/54 automated checks.
+
+## DEC-023 — Presentation first, Ollama approved in principle
+- Status: Approved by A Eya Derouiche, B Aya Fayachi and C Wafe Bziouiche
+- Decision: Real AI with Ollama is approved in principle, but implementation is deferred until after the presentation and demo. The user will provide the Ollama runtime details later.
+- Decision: `presentation/FinTech_API_Gateway.pptx` is the 24-slide English theoretical + practical deck. It covers all mandatory professor topics, both custom diagrams, the comparison matrix, Steps 1-4, evidence gallery, Final Gate result and the Ollama roadmap.
+- Decision: `presentation/slides.md` is the reviewable source outline and `scripts/build_presentation.py` is the reproducible stdlib OOXML builder. The generated PPTX was validated by XML parsing and by opening it in PowerPoint 2013 with 24 slides.
+- Decision: The demo recording is owned by the students; no video is generated or committed by this workflow.

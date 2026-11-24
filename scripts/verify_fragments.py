@@ -126,6 +126,7 @@ def main() -> int:
         "30-transform.yml",
         "40-telemetry.yml",
         "50-tls.yml",
+        "60-healthchecks.yml",
     ]
     missing = [name for name in required if name not in by_name]
     if missing:
@@ -142,6 +143,7 @@ def main() -> int:
             ("10-auth.yml + 30-transform.yml", [auth, by_name["30-transform.yml"]]),
             ("40-telemetry.yml", [by_name["40-telemetry.yml"]]),
             ("50-tls.yml", [by_name["50-tls.yml"]]),
+            ("60-healthchecks.yml", [by_name["60-healthchecks.yml"]]),
             ("ALL fragments combined", fragments),
         ]
 

@@ -40,6 +40,8 @@ x-advisor-common: &advisor-common
   build:
     context: ./advisor
   image: fintech-advisor:dev
+  environment:
+    ADVISOR_LOG_PATH: /var/log/kong/access.json
   volumes:
     - kong-logs:/var/log/kong:ro
   networks:
@@ -296,9 +298,20 @@ services:
       - gateway
     profiles: ["monitoring"]
 
-  # Reserved for later layers. These services are deliberately not enabled in Gate 0.
+  # Layer 4/M1: scrapes Kong Status API and evaluates the frozen C3 rules.
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.16.0
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.listen-address=0.0.0.0:9090
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
     profiles: ["monitoring"]
     networks: ["gateway"]
 
@@ -326,6 +339,34 @@ services:
     command: ["python", "-c", "print('AI profile placeholder; FastAPI service is added in Layer 1')"]
     networks: ["gateway"]
 
+  # Layer 3 / Step 3: real load generators for the replica-offline chaos test.
+  k6:
+    image: grafana/k6:1.8.0
+    container_name: k6
+    profiles: ["load"]
+    networks: ["gateway"]
+    volumes:
+      - ./tests/load:/scripts:ro
+    environment:
+      BASE_URL: http://kong:8000
+      APIKEY: ${ADVISOR_APIKEY:-premium-demo-key}
+      VUS: "2"
+      DURATION: "45s"
+    command: ["run", "/scripts/k6_failover.js"]
+
+  locust:
+    image: locustio/locust:2.47.0
+    container_name: locust
+    profiles: ["load"]
+    networks: ["gateway"]
+    ports:
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - ./tests/load:/mnt/locust:ro
+    environment:
+      APIKEY: ${ADVISOR_APIKEY:-premium-demo-key}
+    command: ["-f", "/mnt/locust/locustfile.py", "--host", "http://kong:8000"]
+
 networks:
   gateway:
     name: fintech-gateway
@@ -337,3 +378,5 @@ volumes:
     name: fintech-postgres-data
   n8n-data:
     name: fintech-n8n-data
+  prometheus-data:
+    name: fintech-prometheus-data

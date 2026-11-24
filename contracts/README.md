@@ -8,8 +8,8 @@ All four contracts are **approved and frozen** by Student A (Eya Derouiche), Stu
 |---|---|---|---|---|
 | C1 | `api/openapi.yml` | 0.3.0 | Approved | Service HTTP interfaces |
 | C2 | `logs/kong-access-log.schema.json` | 0.1.1 | Approved | Analyzer-facing Kong access-log record |
-| C3 | `metrics/alerts-contract.yml` | 0.2.0 | Approved | Alert names, rules and webhook payload |
-| C4 | `naming/environment.yml` | 0.2.0 | Approved | Names, ports, profiles and shared environment |
+| C3 | `metrics/alerts-contract.yml` | 0.2.1 | Approved | Alert names, rules and webhook payload |
+| C4 | `naming/environment.yml` | 0.2.1 | Approved | Names, ports, profiles and shared environment |
 
 ## Versioning
 
