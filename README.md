@@ -3,9 +3,9 @@
 Gate 0 starter repository for Kong Open Source 3.9.1 (DB-less).
 
 ## Prerequisites (Windows)
-- Docker Desktop with Linux containers enabled
-- Git for Windows
-- VS Code
+- Docker Desktop with Linux containers enabled.
+- Git for Windows.
+- VS Code.
 
 Open this folder in VS Code. Run commands in the VS Code PowerShell terminal.
 
